@@ -66,16 +66,17 @@ async function verifyAdminSession(token: string): Promise<AdminUser | null> {
 export async function verifyAdminPassword(password: string): Promise<boolean> {
   const [algorithm, iterationsText, saltText, expectedText] = runtimeValue("ADMIN_PASSWORD_HASH").trim().split("$");
   const iterations = Number(iterationsText);
-  if (algorithm !== "pbkdf2_sha256" || !Number.isInteger(iterations) || iterations < 50_000 || iterations > 500_000 || !saltText || !expectedText) return false;
+  if (algorithm !== "pbkdf2_sha256" || !Number.isInteger(iterations) || iterations < 50_000 || iterations > 100_000 || !saltText || !expectedText) return false;
   try {
     const expected = base64UrlToBytes(expectedText);
-    const passwordKey = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-    const actual = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: ownedBuffer(base64UrlToBytes(saltText)), iterations }, passwordKey, expected.byteLength * 8));
+    const passwordKey = await crypto.subtle.importKey("raw", encoder.encode(password), { name: "PBKDF2" }, false, ["deriveBits"]);
+    const actual = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: { name: "SHA-256" }, salt: ownedBuffer(base64UrlToBytes(saltText)), iterations }, passwordKey, expected.byteLength * 8));
     if (actual.byteLength !== expected.byteLength) return false;
     let difference = 0;
     for (let index = 0; index < actual.byteLength; index += 1) difference |= actual[index] ^ expected[index];
     return difference === 0;
-  } catch {
+  } catch (error) {
+    console.error(JSON.stringify({ event: "admin_password_verification_error", error: error instanceof Error ? error.message : String(error) }));
     return false;
   }
 }
