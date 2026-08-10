@@ -1,6 +1,8 @@
 import { ensureDatabase } from "../../lib/data";
 import { runtimeValue } from "../../lib/security";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const db = await ensureDatabase();

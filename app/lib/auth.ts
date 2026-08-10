@@ -40,7 +40,7 @@ async function hmacKey(secret: string) {
 }
 
 export async function createAdminSession(email: string): Promise<string> {
-  const secret = runtimeValue("ADMIN_SESSION_SECRET");
+  const secret = runtimeValue("ADMIN_SESSION_SECRET").trim();
   if (!secret) throw new Error("관리자 세션 비밀값이 설정되지 않았습니다.");
   const payload = bytesToBase64Url(encoder.encode(JSON.stringify({ email: email.toLowerCase(), exp: Date.now() + 12 * 60 * 60 * 1000 })));
   const signature = new Uint8Array(await crypto.subtle.sign("HMAC", await hmacKey(secret), encoder.encode(payload)));
@@ -48,7 +48,7 @@ export async function createAdminSession(email: string): Promise<string> {
 }
 
 async function verifyAdminSession(token: string): Promise<AdminUser | null> {
-  const secret = runtimeValue("ADMIN_SESSION_SECRET");
+  const secret = runtimeValue("ADMIN_SESSION_SECRET").trim();
   const [payload, signature] = token.split(".");
   if (!secret || !payload || !signature) return null;
   try {
@@ -64,7 +64,7 @@ async function verifyAdminSession(token: string): Promise<AdminUser | null> {
 }
 
 export async function verifyAdminPassword(password: string): Promise<boolean> {
-  const [algorithm, iterationsText, saltText, expectedText] = runtimeValue("ADMIN_PASSWORD_HASH").split("$");
+  const [algorithm, iterationsText, saltText, expectedText] = runtimeValue("ADMIN_PASSWORD_HASH").trim().split("$");
   const iterations = Number(iterationsText);
   if (algorithm !== "pbkdf2_sha256" || !Number.isInteger(iterations) || iterations < 50_000 || iterations > 500_000 || !saltText || !expectedText) return false;
   try {
