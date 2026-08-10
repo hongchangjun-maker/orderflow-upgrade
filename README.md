@@ -1,100 +1,76 @@
-# vinext-starter
+# ORDERFLOW
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+고객 주문 링크부터 상품·재고, 주문 처리, 고객, 매출까지 하나의 흐름으로 연결한 확장형 주문 운영 앱입니다.
 
-## Prerequisites
+## 구현된 기능
 
-- Node.js `>=22.13.0`
+- 로그인 없는 고객 주문서: 분류/검색, 수량 선택, 실시간 재고, 최소 주문금액, 조건부 배송비
+- 실제 주문 저장: 서버 가격 재계산, 재고 검증·차감, 고객 자동 등록, 주문번호 발급
+- 운영 대시보드: 오늘 주문·매출, 미처리 주문, 재고 주의, 주문 파이프라인, 인기 상품
+- 주문 관리: 검색, 상태 변경, 입금 확인, 배송/픽업 구분, 고객 요청사항
+- 상품·재고 관리: 상품 추가·수정, 가격, 재고, 재고 알림 기준, 판매 상태
+- 주문서 설정: 공개 상태, 제목·공지, 최소금액, 배송비, 무료배송 기준, 판매상품 선택
+- 고객·매출: 주문 횟수, 누적 금액, 최근 주문, 상품별 주문 비중
+- 상점 설정과 연동 상태: 문자·결제·카카오가 연결되지 않았을 때 이를 명확히 표시
 
-## Quick Start
+## 기술 구조
+
+- `app/order/[slug]`: 고객용 공개 주문서
+- `app/admin`: 인증된 운영자 전용 관리 앱
+- `app/api/public`: 공개 주문서 조회와 주문 접수 API
+- `app/api/admin`: 주문·상품·고객·주문서·설정 API
+- `app/lib/data.ts`: D1 초기화, 기본 데이터, 요청 지문과 오류 처리
+- `app/lib/auth.ts`: 관리자 인증과 이메일 허용 목록
+- `db/schema.ts`, `drizzle/`: 데이터 모델과 배포 마이그레이션
+
+관리자 API는 서버에서 다시 인증하며, 브라우저 표시 여부만으로 권한을 판단하지 않습니다. 고객이 보내는 가격은 신뢰하지 않고 D1의 현재 상품 가격과 재고로 합계를 다시 계산합니다.
+
+## 데이터 모델
+
+- `shops`: 상점 정보와 결제/완료 안내
+- `products`: 상품, 가격, 재고, 판매 상태
+- `order_forms`, `form_products`: 공개 주문서와 판매상품 구성
+- `orders`, `order_items`: 주문 헤더와 주문 시점 상품 스냅샷
+- `customers`: 휴대폰 기준 고객 누적 정보
+- `activity_logs`: 운영 감사 기록
+- `submission_events`: 공개 주문 남용 제한
+
+재고가 음수가 되는 변경은 데이터베이스 트리거가 차단합니다. 주문 접수는 IP·브라우저 조합을 해시한 짧은 지문으로 시간당 횟수를 제한하며 원본 IP를 저장하지 않습니다.
+
+## 로컬 실행
 
 ```bash
 npm install
 npm run dev
-npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+로컬 관리자 화면이 필요하면 `.env.local`에 아래 값을 사용합니다. 이 파일은 Git에서 제외됩니다.
 
-## Included Shape
-
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
-
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```env
+LOCAL_ADMIN_BYPASS=1
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+배포 환경에서는 `LOCAL_ADMIN_BYPASS`를 설정하지 말고, Sites 환경 변수에 관리자 ChatGPT 로그인 이메일만 설정합니다.
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+```env
+ADMIN_EMAILS=owner@example.com
+```
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+## 검증
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+```bash
+npm run lint
+npm test
+```
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+`npm test`는 배포 빌드와 완성 페이지 서버 렌더링을 함께 확인합니다.
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+## 확장 방법
 
-## Useful Commands
+1. 온라인 결제: `orders.payment_status`를 유지하고 공급자별 결제 테이블과 웹훅 검증 라우트를 추가합니다. 결제 성공은 공급자 승인 응답과 서명 검증이 끝난 뒤에만 기록합니다.
+2. 문자·카카오: 발송 큐와 템플릿 테이블을 추가하고, 주문 상태 변경 후 비동기 작업으로 전송합니다. 공급자 키는 Sites 비밀 환경 변수에 둡니다.
+3. 정기 주문: 주기·다음 실행일·일시정지 상태를 가진 `subscriptions` 테이블을 추가하고 예약 작업이 새 주문을 생성하도록 합니다.
+4. 파일·상품 사진: R2 바인딩을 추가하고 D1에는 파일 소유자·경로·형식·크기만 저장합니다.
+5. 직원 권한: 관리자 허용 목록을 역할 테이블로 확장해 주문 담당, 상품 담당, 정산 담당 권한을 서버 API마다 검사합니다.
 
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+새 기능은 공개 주문 API, 관리자 API, 데이터 모델, 관리 화면을 모듈 단위로 함께 추가하면 기존 주문 흐름을 깨뜨리지 않고 확장할 수 있습니다.
