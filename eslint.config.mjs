@@ -10,6 +10,7 @@ import tseslint from "typescript-eslint";
 const eslintConfig = defineConfig([
   globalIgnores([
     ".next/**",
+    ".wrangler/**",
     "dist/**",
     "out/**",
     "build/**",
@@ -23,6 +24,9 @@ const eslintConfig = defineConfig([
   jsxA11y.flatConfigs.recommended,
   next.configs["core-web-vitals"],
   {
+    rules: {
+      "@next/next/no-img-element": "off",
+    },
     languageOptions: {
       globals: {
         ...globals.browser,

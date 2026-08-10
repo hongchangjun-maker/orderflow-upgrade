@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const shops = sqliteTable("shops", {
   id: text("id").primaryKey(),
@@ -62,7 +62,7 @@ export const customers = sqliteTable("customers", {
   lastOrderedAt: text("last_ordered_at"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
-});
+}, (table) => [index("idx_customers_last_ordered").on(table.lastOrderedAt)]);
 
 export const orders = sqliteTable("orders", {
   id: text("id").primaryKey(),
@@ -82,11 +82,14 @@ export const orders = sqliteTable("orders", {
   subtotal: integer("subtotal").notNull(),
   shippingFee: integer("shipping_fee").notNull(),
   total: integer("total").notNull(),
+  idempotencyKey: text("idempotency_key"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (table) => [
   index("idx_orders_status_created").on(table.status, table.createdAt),
   index("idx_orders_customer").on(table.customerId, table.createdAt),
+  index("idx_orders_created").on(table.createdAt),
+  uniqueIndex("idx_orders_idempotency_key").on(table.idempotencyKey),
 ]);
 
 export const orderItems = sqliteTable("order_items", {
@@ -97,7 +100,10 @@ export const orderItems = sqliteTable("order_items", {
   unitPrice: integer("unit_price").notNull(),
   quantity: integer("quantity").notNull(),
   lineTotal: integer("line_total").notNull(),
-}, (table) => [index("idx_order_items_order").on(table.orderId)]);
+}, (table) => [
+  index("idx_order_items_order").on(table.orderId),
+  index("idx_order_items_product").on(table.productId),
+]);
 
 export const activityLogs = sqliteTable("activity_logs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -105,9 +111,14 @@ export const activityLogs = sqliteTable("activity_logs", {
   summary: text("summary").notNull(),
   actor: text("actor").notNull().default("system"),
   createdAt: text("created_at").notNull(),
-});
+}, (table) => [index("idx_activity_logs_created").on(table.createdAt)]);
 
 export const submissionEvents = sqliteTable("submission_events", {
   fingerprint: text("fingerprint").notNull(),
   createdAt: text("created_at").notNull(),
 }, (table) => [index("idx_submission_events_lookup").on(table.fingerprint, table.createdAt)]);
+
+export const adminLoginAttempts = sqliteTable("admin_login_attempts", {
+  fingerprint: text("fingerprint").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [index("idx_admin_login_attempts_lookup").on(table.fingerprint, table.createdAt)]);

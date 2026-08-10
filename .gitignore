@@ -26,6 +26,7 @@
 npm-debug.log*
 dev.stdout.log
 dev.stderr.log
+lint-result.txt
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
@@ -37,6 +38,7 @@ yarn-error.log*
 .vercel
 
 /dist/
+*.tsbuildinfo
 /.wrangler/
 /outputs/
 /work/

@@ -15,6 +15,20 @@
       "when": 1786330363244,
       "tag": "0001_harsh_warbird",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786331657967,
+      "tag": "0002_slow_brood",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1786331673839,
+      "tag": "0003_condemned_calypso",
+      "breakpoints": true
     }
   ]
 }

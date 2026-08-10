@@ -20,19 +20,19 @@ type Customer = { id: string; name: string; phone: string; address: string; orde
 type FormConfig = { id: string; slug: string; title: string; notice: string; minOrderAmount: number; shippingFee: number; freeShippingAt: number; active: boolean; productIds: string[] };
 type ShopSettings = { name: string; tagline: string; phone: string; paymentGuide: string; orderCompleteMessage: string };
 
-const menu: Array<{ id: Tab; label: string; code: string }> = [
-  { id: "dashboard", label: "오늘 운영", code: "01" },
-  { id: "orders", label: "주문 관리", code: "02" },
-  { id: "products", label: "상품·재고", code: "03" },
-  { id: "forms", label: "주문서 만들기", code: "04" },
-  { id: "customers", label: "고객", code: "05" },
-  { id: "analytics", label: "매출 분석", code: "06" },
-  { id: "settings", label: "설정", code: "07" },
+const menu: Array<{ id: Tab; label: string; icon: string }> = [
+  { id: "dashboard", label: "오늘 운영", icon: "dashboard" },
+  { id: "orders", label: "주문 관리", icon: "orders" },
+  { id: "products", label: "상품·재고", icon: "products" },
+  { id: "forms", label: "주문서 만들기", icon: "forms" },
+  { id: "customers", label: "고객", icon: "customers" },
+  { id: "analytics", label: "매출 분석", icon: "analytics" },
+  { id: "settings", label: "설정", icon: "settings" },
 ];
 
 const won = (value: number) => `${Number(value || 0).toLocaleString("ko-KR")}원`;
 const shortTime = (value: string | null) => value ? new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)) : "-";
-const glyph: Record<string, string> = { PEACH: "복", EGG: "란", PAN: "팬", MELON: "멜", LEAF: "채", BOWL: "식", NOODLE: "면", BOX: "품" };
+const productImage = (id: string) => `/visuals/products/${id.replace("prod-", "")}.webp`;
 
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...options, headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) }, cache: "no-store" });
@@ -80,10 +80,10 @@ export function AdminApp({ user }: { user: { name: string; email: string } }) {
   return (
     <div className="admin-shell">
       <aside className="admin-sidebar">
-        <Link href="/" className="brand-lockup admin-brand"><span className="brand-mark">O</span><span>ORDERFLOW</span></Link>
+        <Link href="/" className="brand-lockup admin-brand"><img src="/visuals/orderflow-mark.webp" alt="" /><span>ORDERFLOW</span></Link>
         <div className="workspace-card"><span>WORKSPACE</span><b>{settings?.name ?? "오더플로우 마켓"}</b><small>운영 중</small></div>
         <nav className="admin-menu" aria-label="관리자 메뉴">
-          {menu.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}><span>{item.code}</span>{item.label}</button>)}
+          {menu.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}><img src={`/visuals/icons/${item.icon}.webp`} alt="" />{item.label}</button>)}
         </nav>
         <div className="integration-note"><span>연동 센터</span><b>문자·결제·카카오</b><small>필요할 때 모듈을 연결하세요.</small></div>
         <div className="admin-user"><span>{user.name.slice(0, 1)}</span><div><b>{user.name}</b><small>{user.email}</small></div></div>
@@ -92,7 +92,7 @@ export function AdminApp({ user }: { user: { name: string; email: string } }) {
       <main className="admin-main">
         <header className="admin-topbar">
           <div><p>{new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "long" }).format(new Date())}</p><h1>{menu.find((item) => item.id === tab)?.label}</h1></div>
-          <div className="topbar-actions"><Link href="/order/fresh-market" target="_blank" className="button button-ghost">고객 화면 ↗</Link><button className="round-button" onClick={refreshAll} aria-label="새로고침">↻</button></div>
+          <div className="topbar-actions"><Link href="/order/fresh-market" target="_blank" className="button button-ghost">고객 화면 열기</Link><button className="round-button icon-button" onClick={refreshAll} aria-label="새로고침"><img src="/visuals/icons/dashboard.webp" alt="" /></button><button className="button button-soft" onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.reload(); }}>로그아웃</button></div>
         </header>
 
         <div className="admin-content">
@@ -138,7 +138,8 @@ function DashboardView({ dashboard, statusCount, onMove }: { dashboard: Dashboar
 }
 
 function Metric({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: string }) {
-  return <article className={`metric-card ${tone}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
+  const icon = tone === "green" ? "payment" : tone === "violet" ? "delivery" : tone === "amber" ? "inventory" : "orders";
+  return <article className={`metric-card ${tone}`}><img className="metric-icon" src={`/visuals/icons/${icon}.webp`} alt="" /><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
 }
 
 function OrdersView({ orders, filter, query, onFilter, onQuery, onSearch, onUpdate, busy }: { orders: Order[]; filter: string; query: string; onFilter: (v: string) => void; onQuery: (v: string) => void; onSearch: () => void; onUpdate: (id: string, status: OrderStatus, paymentStatus?: string) => void; busy: boolean }) {
@@ -170,7 +171,7 @@ function ProductsView({ products, onSaved, notify }: { products: Product[]; onSa
     <section className="panel data-panel">
       <div className="panel-head"><div><p className="eyebrow">PRODUCT CATALOG</p><h2>상품과 재고</h2></div><button className="button button-primary" onClick={() => setEditing(blank)}>+ 상품 추가</button></div>
       <div className="product-admin-grid">{products.map((product) => <button className={`product-admin-card ${!product.active ? "inactive" : ""}`} key={product.id} onClick={() => setEditing(product)}>
-        <span className="product-glyph">{glyph[product.icon] ?? "품"}</span><div><small>{product.category} · {product.unit}</small><b>{product.name}</b><strong>{won(product.price)}</strong></div><em className={product.stock <= product.lowStockAt ? "low" : ""}>{product.stock}개</em>
+        <span className="product-glyph"><img src={productImage(product.id)} alt="" onError={(event) => { event.currentTarget.src = "/visuals/icons/products.webp"; }} /></span><div><small>{product.category} · {product.unit}</small><b>{product.name}</b><strong>{won(product.price)}</strong></div><em className={product.stock <= product.lowStockAt ? "low" : ""}>{product.stock}개</em>
       </button>)}</div>
     </section>
     {editing && <aside className="editor-panel"><div className="panel-head"><h2>{editing.id ? "상품 수정" : "새 상품"}</h2><button className="round-button" onClick={() => setEditing(null)}>×</button></div>
@@ -199,7 +200,7 @@ function FormBuilder({ form, products, onChange, onSave, busy }: { form: FormCon
       <div className="link-preview"><span>고객 링크</span><code>/order/{form.slug}</code><Link href={`/order/${form.slug}`} target="_blank">미리보기 ↗</Link></div>
     </section>
     <section className="panel form-products"><div className="panel-head"><div><p className="eyebrow">ITEMS</p><h2>판매 상품 선택</h2></div><b>{form.productIds.length}개 선택</b></div>
-      <div className="select-product-list">{products.map((product) => <label key={product.id} className={selected.has(product.id) ? "selected" : ""}><input type="checkbox" checked={selected.has(product.id)} onChange={() => toggle(product.id)} /><span className="product-glyph">{glyph[product.icon] ?? "품"}</span><div><b>{product.name}</b><small>{won(product.price)} · 재고 {product.stock}</small></div></label>)}</div>
+      <div className="select-product-list">{products.map((product) => <label key={product.id} className={selected.has(product.id) ? "selected" : ""}><input aria-label={`주문서에 ${product.name} 포함`} type="checkbox" checked={selected.has(product.id)} onChange={() => toggle(product.id)} /><span className="product-glyph"><img src={productImage(product.id)} alt="" onError={(event) => { event.currentTarget.src = "/visuals/icons/products.webp"; }} /></span><div><b>{product.name}</b><small>{won(product.price)} · 재고 {product.stock}</small></div></label>)}</div>
       <button className="button button-primary button-full" onClick={onSave} disabled={busy}>{busy ? "저장 중..." : "주문서 저장"}</button>
     </section>
   </div>;
@@ -207,7 +208,7 @@ function FormBuilder({ form, products, onChange, onSave, busy }: { form: FormCon
 
 function CustomersView({ customers }: { customers: Customer[] }) {
   return <section className="panel data-panel"><div className="panel-head"><div><p className="eyebrow">CUSTOMERS</p><h2>고객 주문 이력</h2></div><span className="state-chip on">{customers.length}명</span></div>
-    <div className="customer-grid">{customers.map((customer) => <article key={customer.id}><span className="customer-avatar">{customer.name.slice(0, 1)}</span><div><b>{customer.name}</b><small>{customer.phone}</small><p>{customer.address || "저장된 주소 없음"}</p></div><dl><div><dt>주문</dt><dd>{customer.orderCount}회</dd></div><div><dt>누적</dt><dd>{won(customer.totalSpent)}</dd></div><div><dt>최근</dt><dd>{shortTime(customer.lastOrderedAt)}</dd></div></dl></article>)}</div>
+    <div className="customer-grid">{customers.map((customer) => <article key={customer.id}><span className="customer-avatar"><img src="/visuals/icons/customers.webp" alt="" /></span><div><b>{customer.name}</b><small>{customer.phone}</small><p>{customer.address || "저장된 주소 없음"}</p></div><dl><div><dt>주문</dt><dd>{customer.orderCount}회</dd></div><div><dt>누적</dt><dd>{won(customer.totalSpent)}</dd></div><div><dt>최근</dt><dd>{shortTime(customer.lastOrderedAt)}</dd></div></dl></article>)}</div>
     {!customers.length && <EmptyState text="첫 주문이 접수되면 고객이 자동으로 등록됩니다." />}
   </section>;
 }
@@ -222,10 +223,10 @@ function SettingsView({ settings, onChange, onSave, busy }: { settings: ShopSett
   if (!settings) return <LoadingState />;
   return <div className="settings-layout"><section className="panel form-panel"><div className="panel-head"><div><p className="eyebrow">SHOP PROFILE</p><h2>상점 기본 정보</h2></div></div>
     <Field label="상점명"><input value={settings.name} onChange={(e) => onChange({ ...settings, name: e.target.value })} /></Field><Field label="한 줄 소개"><input value={settings.tagline} onChange={(e) => onChange({ ...settings, tagline: e.target.value })} /></Field><Field label="고객 문의 연락처"><input value={settings.phone} onChange={(e) => onChange({ ...settings, phone: e.target.value })} /></Field><Field label="결제 안내"><textarea value={settings.paymentGuide} onChange={(e) => onChange({ ...settings, paymentGuide: e.target.value })} /></Field><Field label="주문 완료 안내"><textarea value={settings.orderCompleteMessage} onChange={(e) => onChange({ ...settings, orderCompleteMessage: e.target.value })} /></Field><button className="button button-primary" onClick={onSave} disabled={busy}>{busy ? "저장 중..." : "설정 저장"}</button></section>
-    <section className="panel integration-panel"><div className="panel-head"><div><p className="eyebrow">INTEGRATIONS</p><h2>외부 서비스</h2></div></div>{[["문자 발송", "고객 알림과 배송 완료 안내", "연결 안 됨"], ["온라인 결제", "카드·간편결제 승인", "연결 안 됨"], ["카카오 알림", "주문 링크와 상태 알림", "연결 안 됨"]].map((item) => <div className="integration-row" key={item[0]}><span>+</span><div><b>{item[0]}</b><small>{item[1]}</small></div><em>{item[2]}</em></div>)}<p className="truth-note">연결되지 않은 서비스는 성공한 것처럼 표시하지 않습니다. 공급자 키는 서버에서만 보관하도록 확장합니다.</p></section>
+    <section className="panel integration-panel"><div className="panel-head"><div><p className="eyebrow">INTEGRATIONS</p><h2>외부 서비스</h2></div></div>{[["문자 발송", "고객 알림과 배송 완료 안내", "연결 안 됨", "forms"], ["온라인 결제", "카드·간편결제 승인", "연결 안 됨", "payment"], ["카카오 알림", "주문 링크와 상태 알림", "연결 안 됨", "delivery"]].map((item) => <div className="integration-row" key={item[0]}><span><img src={`/visuals/icons/${item[3]}.webp`} alt="" /></span><div><b>{item[0]}</b><small>{item[1]}</small></div><em>{item[2]}</em></div>)}<p className="truth-note">연결되지 않은 서비스는 성공한 것처럼 표시하지 않습니다. 공급자 키는 서버에서만 보관하도록 확장합니다.</p></section>
   </div>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="field"><span>{label}</span>{children}</label>; }
 function LoadingState() { return <div className="loading-state"><i /><p>운영 데이터를 불러오고 있습니다.</p></div>; }
-function EmptyState({ text }: { text: string }) { return <div className="empty-state"><span>+</span><p>{text}</p></div>; }
+function EmptyState({ text }: { text: string }) { return <div className="empty-state"><span><img src="/visuals/icons/inventory.webp" alt="" /></span><p>{text}</p></div>; }

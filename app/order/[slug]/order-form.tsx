@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { Product, PublicOrderForm } from "../../lib/types";
 
 const won = (value: number) => `${value.toLocaleString("ko-KR")}원`;
-const glyph: Record<string, string> = { PEACH: "복", EGG: "란", PAN: "팬", MELON: "멜", LEAF: "채", BOWL: "식", NOODLE: "면", BOX: "품" };
+const productImage = (id: string) => `/visuals/products/${id.replace("prod-", "")}.webp`;
 
 type Checkout = { name: string; phone: string; deliveryMethod: "delivery" | "pickup"; postalCode: string; address: string; addressDetail: string; requestNote: string; paymentMethod: "bank" | "pickup"; agreed: boolean; website: string };
 
@@ -19,10 +19,11 @@ export function OrderFormApp({ slug }: { slug: string }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<{ orderNo: string; total: number } | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
     fetch(`/api/public/forms/${encodeURIComponent(slug)}`, { cache: "no-store" })
-      .then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.error); return data; })
+      .then(async (response) => { const data = await response.json() as { form?: PublicOrderForm; error?: string }; if (!response.ok || !data.form) throw new Error(data.error ?? "주문서를 불러오지 못했습니다."); return { form: data.form }; })
       .then((data) => setForm(data.form))
       .catch((reason) => setError(reason.message || "주문서를 불러오지 못했습니다."));
   }, [slug]);
@@ -42,29 +43,30 @@ export function OrderFormApp({ slug }: { slug: string }) {
     if (!form) return;
     setSubmitting(true); setError("");
     try {
-      const response = await fetch("/api/public/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ formSlug: slug, ...checkout, items: items.map((item) => ({ productId: item.product.id, quantity: item.quantity })) }) });
-      const data = await response.json();
+      const response = await fetch("/api/public/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ formSlug: slug, idempotencyKey, ...checkout, items: items.map((item) => ({ productId: item.product.id, quantity: item.quantity })) }) });
+      const data = await response.json() as { error?: string; order?: { orderNo: string; total: number } };
       if (!response.ok) throw new Error(data.error ?? "주문을 접수하지 못했습니다.");
+      if (!data.order) throw new Error("주문 결과를 확인하지 못했습니다.");
       setSuccess({ orderNo: data.order.orderNo, total: data.order.total });
       setCartOpen(false);
     } catch (reason) { setError((reason as Error).message); }
     finally { setSubmitting(false); }
   };
 
-  if (success) return <main className="success-shell"><section className="success-card"><span className="success-mark">✓</span><p className="eyebrow">ORDER RECEIVED</p><h1>주문이 접수됐어요.</h1><p>운영자가 주문을 확인한 뒤 안내드릴게요.</p><dl><div><dt>주문번호</dt><dd>{success.orderNo}</dd></div><div><dt>결제 예정금액</dt><dd>{won(success.total)}</dd></div></dl><Link href="/" className="button button-primary button-full">처음으로</Link></section></main>;
+  if (success) return <main className="success-shell"><section className="success-card"><img className="success-icon" src="/visuals/icons/orders.webp" alt="주문 접수 완료" /><p className="eyebrow">ORDER RECEIVED</p><h1>주문이 접수됐어요.</h1><p>운영자가 주문을 확인한 뒤 안내드릴게요.</p><dl><div><dt>주문번호</dt><dd>{success.orderNo}</dd></div><div><dt>결제 예정금액</dt><dd>{won(success.total)}</dd></div></dl><Link href="/" className="button button-primary button-full">처음으로</Link></section></main>;
   if (!form && error) return <main className="success-shell"><section className="success-card"><span className="success-mark error">!</span><h1>주문서를 열 수 없어요.</h1><p>{error}</p><Link href="/" className="button button-ghost">처음으로</Link></section></main>;
-  if (!form) return <main className="store-loading"><span className="brand-mark">O</span><p>신선한 상품을 준비하고 있어요.</p></main>;
+  if (!form) return <main className="store-loading"><img src="/visuals/orderflow-mark.webp" alt="" /><p>신선한 상품을 준비하고 있어요.</p></main>;
 
   return <div className="store-shell">
-    <header className="store-header"><div className="store-header-inner"><Link href="/" className="brand-lockup"><span className="brand-mark">O</span><span>{form.shop.name}</span></Link><button className="cart-pill" onClick={() => setCartOpen(true)}><span>장바구니</span><b>{itemCount}</b><em>{won(subtotal)}</em></button></div></header>
+    <header className="store-header"><div className="store-header-inner"><Link href="/" className="brand-lockup"><img src="/visuals/orderflow-mark.webp" alt="" /><span>{form.shop.name}</span></Link><button className="cart-pill" onClick={() => setCartOpen(true)}><img src="/visuals/icons/cart.webp" alt="" /><span>장바구니</span><b>{itemCount}</b><em>{won(subtotal)}</em></button></div></header>
 
     <main className="store-main">
       <section className="store-hero"><div><p className="eyebrow">WEEKLY MARKET · 바로 주문</p><h1>{form.title}</h1><p>{form.shop.tagline}</p></div><div className="store-notice"><span>안내</span><p>{form.notice}</p></div></section>
       <div className="store-layout">
         <section className="catalog-section">
-          <div className="catalog-toolbar"><div className="category-tabs">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div><label className="catalog-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="상품 검색" /></label></div>
+          <div className="catalog-toolbar"><div className="category-tabs">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div><label className="catalog-search"><img src="/visuals/icons/search.webp" alt="" /><input aria-label="상품 검색" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="상품 검색" /></label></div>
           <div className="product-grid">{visibleProducts.map((product) => { const quantity = quantities[product.id] ?? 0; const soldOut = product.stock === 0; return <article className={`store-product ${soldOut ? "sold-out" : ""}`} key={product.id}>
-            <div className={`product-visual visual-${product.sortOrder % 4}`}><span>{glyph[product.icon] ?? "품"}</span>{product.stock <= product.lowStockAt && product.stock > 0 && <em>마감 임박</em>}{soldOut && <em>품절</em>}</div>
+            <div className="product-visual"><img src={productImage(product.id)} alt={`${product.name} 상품 사진`} loading="lazy" onError={(event) => { event.currentTarget.src = "/visuals/icons/products.webp"; }} />{product.stock <= product.lowStockAt && product.stock > 0 && <em>마감 임박</em>}{soldOut && <em>품절</em>}</div>
             <div className="product-copy"><small>{product.category} · {product.unit}</small><h2>{product.name}</h2><p>{product.description}</p><div className="product-bottom"><strong>{won(product.price)}</strong>{quantity > 0 ? <div className="stepper"><button onClick={() => adjust(product, -1)} aria-label={`${product.name} 수량 줄이기`}>−</button><b>{quantity}</b><button onClick={() => adjust(product, 1)} aria-label={`${product.name} 수량 늘리기`}>+</button></div> : <button className="add-button" onClick={() => adjust(product, 1)} disabled={soldOut}>담기 +</button>}</div></div>
           </article>; })}</div>
           {!visibleProducts.length && <div className="empty-state"><span>⌕</span><p>조건에 맞는 상품이 없습니다.</p></div>}

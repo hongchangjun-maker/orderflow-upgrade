@@ -1,4 +1,5 @@
 import { ensureDatabase, fingerprintRequest, jsonError } from "../../../lib/data";
+import { deterministicId, validateMutationRequest } from "../../../lib/security";
 
 type OrderPayload = {
   formSlug?: string;
@@ -12,12 +13,15 @@ type OrderPayload = {
   paymentMethod?: string;
   agreed?: boolean;
   website?: string;
+  idempotencyKey?: string;
   items?: Array<{ productId?: string; quantity?: number }>;
 };
 
 const cleanText = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0, max) : "";
 
 export async function POST(request: Request) {
+  const invalidRequest = validateMutationRequest(request);
+  if (invalidRequest) return invalidRequest;
   try {
     const payload = (await request.json()) as OrderPayload;
     if (payload.website) return Response.json({ ok: true }, { status: 201 });
@@ -27,11 +31,15 @@ export async function POST(request: Request) {
     const deliveryMethod = cleanText(payload.deliveryMethod, 20);
     const paymentMethod = cleanText(payload.paymentMethod, 20);
     const formSlug = cleanText(payload.formSlug, 80);
+    const idempotencyKey = cleanText(payload.idempotencyKey, 80);
     if (!customerName || !/^01[0-9]{8,9}$/.test(phone) || !payload.agreed) {
       return Response.json({ error: "이름, 휴대폰 번호, 개인정보 동의를 확인해 주세요." }, { status: 400 });
     }
     if (!['delivery', 'pickup'].includes(deliveryMethod) || !['bank', 'pickup'].includes(paymentMethod)) {
       return Response.json({ error: "배송 또는 결제 방법을 확인해 주세요." }, { status: 400 });
+    }
+    if (!/^[a-zA-Z0-9_-]{16,80}$/.test(idempotencyKey)) {
+      return Response.json({ error: "주문 요청 식별값을 확인해 주세요." }, { status: 400 });
     }
     const normalizedItems = (payload.items ?? [])
       .map((item) => ({ productId: cleanText(item.productId, 80), quantity: Math.floor(Number(item.quantity ?? 0)) }))
@@ -41,6 +49,8 @@ export async function POST(request: Request) {
     }
 
     const db = await ensureDatabase();
+    const replay = await db.prepare(`SELECT id, order_no AS orderNo, total, status FROM orders WHERE idempotency_key = ?`).bind(idempotencyKey).first();
+    if (replay) return Response.json({ order: replay, replayed: true }, { headers: { "Cache-Control": "no-store" } });
     const fingerprint = await fingerprintRequest(request);
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const recent = await db.prepare(`SELECT COUNT(*) AS count FROM submission_events WHERE fingerprint = ? AND created_at >= ?`).bind(fingerprint, oneHourAgo).first<{ count: number }>();
@@ -74,15 +84,14 @@ export async function POST(request: Request) {
     const dateCode = now.slice(2, 10).replaceAll("-", "");
     const orderId = crypto.randomUUID();
     const orderNo = `OF-${dateCode}-${crypto.randomUUID().slice(0, 5).toUpperCase()}`;
-    const existingCustomer = await db.prepare(`SELECT id FROM customers WHERE phone = ?`).bind(phone).first<{ id: string }>();
-    const customerId = existingCustomer?.id ?? crypto.randomUUID();
+    const customerId = await deterministicId("customer", phone);
     const address = cleanText(payload.address, 160);
     const addressDetail = cleanText(payload.addressDetail, 120);
     if (deliveryMethod === "delivery" && !address) return Response.json({ error: "배송 주소를 입력해 주세요." }, { status: 400 });
 
     const statements = [
       db.prepare(`INSERT INTO customers (id, name, phone, address, order_count, total_spent, points, last_ordered_at, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, 0, ?, ?, ?) ON CONFLICT(phone) DO UPDATE SET name = excluded.name, address = excluded.address, order_count = customers.order_count + 1, total_spent = customers.total_spent + excluded.total_spent, last_ordered_at = excluded.last_ordered_at, updated_at = excluded.updated_at`).bind(customerId, customerName, phone, `${address} ${addressDetail}`.trim(), total, now, now, now),
-      db.prepare(`INSERT INTO orders (id, order_no, form_id, customer_id, customer_name, customer_phone, delivery_method, postal_code, address, address_detail, request_note, payment_method, payment_status, status, subtotal, shipping_fee, total, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', 'new', ?, ?, ?, ?, ?)`).bind(orderId, orderNo, form.id, customerId, customerName, phone, deliveryMethod, cleanText(payload.postalCode, 12), address, addressDetail, cleanText(payload.requestNote, 300), paymentMethod, subtotal, shippingFee, total, now, now),
+      db.prepare(`INSERT INTO orders (id, order_no, form_id, customer_id, customer_name, customer_phone, delivery_method, postal_code, address, address_detail, request_note, payment_method, payment_status, status, subtotal, shipping_fee, total, idempotency_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', 'new', ?, ?, ?, ?, ?, ?)`).bind(orderId, orderNo, form.id, customerId, customerName, phone, deliveryMethod, cleanText(payload.postalCode, 12), address, addressDetail, cleanText(payload.requestNote, 300), paymentMethod, subtotal, shippingFee, total, idempotencyKey, now, now),
       ...normalizedItems.flatMap((item) => {
         const product = products.get(item.productId)!;
         return [
@@ -92,9 +101,18 @@ export async function POST(request: Request) {
       }),
       db.prepare(`INSERT INTO activity_logs (action, summary, actor, created_at) VALUES ('order.created', ?, 'customer', ?)`).bind(`${orderNo} 새 주문`, now),
       db.prepare(`INSERT INTO submission_events (fingerprint, created_at) VALUES (?, ?)`).bind(fingerprint, now),
-      db.prepare(`DELETE FROM submission_events WHERE created_at < ?`).bind(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
     ];
-    await db.batch(statements);
+    const cleanupSample = crypto.getRandomValues(new Uint8Array(1))[0];
+    if (cleanupSample % 32 === 0) statements.push(db.prepare(`DELETE FROM submission_events WHERE created_at < ?`).bind(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()));
+    try {
+      await db.batch(statements);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("idx_orders_idempotency_key")) {
+        const existing = await db.prepare(`SELECT id, order_no AS orderNo, total, status FROM orders WHERE idempotency_key = ?`).bind(idempotencyKey).first();
+        if (existing) return Response.json({ order: existing, replayed: true }, { headers: { "Cache-Control": "no-store" } });
+      }
+      throw error;
+    }
     return Response.json({ order: { id: orderId, orderNo, total, status: "new" } }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return jsonError(error);

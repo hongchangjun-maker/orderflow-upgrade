@@ -10,8 +10,13 @@
     "build": "vinext build",
     "start": "vinext start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern worker-configuration.d.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:local": "wrangler d1 migrations apply orderflow-upgrade-db --local",
+    "db:remote": "wrangler d1 migrations apply orderflow-upgrade-db --remote",
+    "cf:types": "wrangler types worker-configuration.d.ts",
+    "deploy:cloudflare": "npm run build && wrangler deploy --keep-vars"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
@@ -19,7 +24,8 @@
     "react-dom": "19.2.6"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
+    "@cloudflare/vite-plugin": "^1.51.1",
+    "@cloudflare/workers-types": "^5.20260810.1",
     "@eslint/js": "9.39.4",
     "@next/eslint-plugin-next": "16.2.6",
     "@tailwindcss/postcss": "4.2.1",
@@ -40,7 +46,7 @@
     "typescript-eslint": "8.59.3",
     "vinext": "1.0.0-beta.2",
     "vite": "8.0.13",
-    "wrangler": "4.92.0"
+    "wrangler": "^4.120.0"
   },
   "type": "module"
 }

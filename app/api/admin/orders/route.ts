@@ -11,13 +11,16 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const status = url.searchParams.get("status") ?? "all";
     const query = (url.searchParams.get("q") ?? "").trim().slice(0, 80);
+    const before = (url.searchParams.get("before") ?? "").trim().slice(0, 30);
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (status !== "all" && statuses.has(status)) { clauses.push("o.status = ?"); params.push(status); }
     if (query) { clauses.push("(o.order_no LIKE ? OR o.customer_name LIKE ? OR o.customer_phone LIKE ?)"); const like = `%${query}%`; params.push(like, like, like); }
+    if (before && /^\d{4}-\d{2}-\d{2}T/u.test(before)) { clauses.push("o.created_at < ?"); params.push(before); }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-    const rows = await db.prepare(`SELECT o.id, o.order_no AS orderNo, o.customer_name AS customerName, o.customer_phone AS customerPhone, o.delivery_method AS deliveryMethod, o.payment_method AS paymentMethod, o.payment_status AS paymentStatus, o.status, o.total, o.request_note AS requestNote, o.created_at AS createdAt, COALESCE((SELECT GROUP_CONCAT(oi.product_name || ' × ' || oi.quantity, ', ') FROM order_items oi WHERE oi.order_id = o.id), '') AS items FROM orders o ${where} ORDER BY o.created_at DESC LIMIT 120`).bind(...params).all();
-    return Response.json({ orders: rows.results }, { headers: { "Cache-Control": "no-store" } });
+    const rows = await db.prepare(`SELECT o.id, o.order_no AS orderNo, o.customer_name AS customerName, o.customer_phone AS customerPhone, o.delivery_method AS deliveryMethod, o.payment_method AS paymentMethod, o.payment_status AS paymentStatus, o.status, o.total, o.request_note AS requestNote, o.created_at AS createdAt, COALESCE((SELECT GROUP_CONCAT(oi.product_name || ' × ' || oi.quantity, ', ') FROM order_items oi WHERE oi.order_id = o.id), '') AS items FROM orders o ${where} ORDER BY o.created_at DESC LIMIT 60`).bind(...params).all();
+    const last = rows.results.at(-1) as { createdAt?: string } | undefined;
+    return Response.json({ orders: rows.results, nextCursor: rows.results.length === 60 ? last?.createdAt ?? null : null }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return jsonError(error);
   }
