@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { STATUS_META, type OrderStatus, type Product } from "../lib/types";
 
@@ -53,10 +53,23 @@ export function AdminApp({ user }: { user: { name: string; email: string } }) {
   const [message, setMessage] = useState("");
   const [orderFilter, setOrderFilter] = useState("all");
   const [orderQuery, setOrderQuery] = useState("");
+  const [nextOrderCursor, setNextOrderCursor] = useState<string | null>(null);
+  const latestOrderId = useRef<string | null>(null);
 
   const notify = (value: string) => { setMessage(value); window.setTimeout(() => setMessage(""), 2500); };
   const loadDashboard = useCallback(async () => setDashboard((await api<{ metrics: Dashboard["metrics"]; statuses: Dashboard["statuses"]; topProducts: Dashboard["topProducts"]; activities: Dashboard["activities"] }>("/api/admin/dashboard"))), []);
-  const loadOrders = useCallback(async () => setOrders((await api<{ orders: Order[] }>(`/api/admin/orders?status=${orderFilter}&q=${encodeURIComponent(orderQuery)}`)).orders), [orderFilter, orderQuery]);
+  const loadOrders = useCallback(async () => {
+    const data = await api<{ orders: Order[]; nextCursor: string | null }>(`/api/admin/orders?status=${orderFilter}&q=${encodeURIComponent(orderQuery)}`);
+    latestOrderId.current = data.orders[0]?.id ?? null;
+    setOrders(data.orders);
+    setNextOrderCursor(data.nextCursor);
+  }, [orderFilter, orderQuery]);
+  const loadMoreOrders = async () => {
+    if (!nextOrderCursor) return;
+    const data = await api<{ orders: Order[]; nextCursor: string | null }>(`/api/admin/orders?status=${orderFilter}&q=${encodeURIComponent(orderQuery)}&cursor=${encodeURIComponent(nextOrderCursor)}`);
+    setOrders((current) => [...current, ...data.orders.filter((order) => !current.some((item) => item.id === order.id))]);
+    setNextOrderCursor(data.nextCursor);
+  };
   const loadProducts = useCallback(async () => setProducts((await api<{ products: Product[] }>("/api/admin/products")).products.map((product) => ({ ...product, active: Boolean(product.active) }))), []);
   const loadCustomers = useCallback(async () => setCustomers((await api<{ customers: Customer[] }>("/api/admin/customers")).customers), []);
   const loadForm = useCallback(async () => setForm((await api<{ form: FormConfig }>("/api/admin/forms")).form), []);
@@ -73,6 +86,25 @@ export function AdminApp({ user }: { user: { name: string; email: string } }) {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [tab, loadOrders, loadProducts, loadCustomers, loadForm, loadSettings, loadDashboard]);
+  useEffect(() => {
+    if (tab !== "orders") return;
+    const poll = window.setInterval(async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const data = await api<{ orders: Order[]; nextCursor: string | null }>(`/api/admin/orders?status=${orderFilter}&q=${encodeURIComponent(orderQuery)}`);
+        const firstId = data.orders[0]?.id ?? null;
+        if (firstId && latestOrderId.current && firstId !== latestOrderId.current) {
+          setOrders(data.orders);
+          setNextOrderCursor(data.nextCursor);
+          setMessage("새 주문이 도착했습니다. 목록을 최신 상태로 갱신했습니다.");
+          window.setTimeout(() => setMessage(""), 3500);
+          loadDashboard().catch(() => undefined);
+        }
+        latestOrderId.current = firstId;
+      } catch { /* 다음 자동 갱신에서 다시 시도합니다. */ }
+    }, 15_000);
+    return () => window.clearInterval(poll);
+  }, [tab, orderFilter, orderQuery, loadDashboard]);
 
   const statusCount = (status: OrderStatus) => dashboard?.statuses.find((item) => item.status === status)?.count ?? 0;
   const refreshAll = async () => { await Promise.all([loadDashboard(), loadOrders(), loadProducts()]); notify("최신 데이터로 새로고침했습니다."); };
@@ -97,7 +129,7 @@ export function AdminApp({ user }: { user: { name: string; email: string } }) {
 
         <div className="admin-content">
           {tab === "dashboard" && <DashboardView dashboard={dashboard} statusCount={statusCount} onMove={setTab} />}
-          {tab === "orders" && <OrdersView orders={orders} filter={orderFilter} query={orderQuery} onFilter={setOrderFilter} onQuery={setOrderQuery} onSearch={loadOrders} onUpdate={async (id, status, paymentStatus) => { setBusy(true); try { await api("/api/admin/orders", { method: "PATCH", body: JSON.stringify({ id, status, paymentStatus }) }); await Promise.all([loadOrders(), loadDashboard()]); notify("주문 상태를 변경했습니다."); } catch (error) { notify((error as Error).message); } finally { setBusy(false); } }} busy={busy} />}
+          {tab === "orders" && <OrdersView orders={orders} filter={orderFilter} query={orderQuery} nextCursor={nextOrderCursor} onFilter={setOrderFilter} onQuery={setOrderQuery} onSearch={loadOrders} onLoadMore={loadMoreOrders} onUpdate={async (id, status, paymentStatus) => { setBusy(true); try { await api("/api/admin/orders", { method: "PATCH", body: JSON.stringify({ id, status, paymentStatus }) }); await Promise.all([loadOrders(), loadDashboard()]); notify("주문 상태를 변경했습니다."); } catch (error) { notify((error as Error).message); } finally { setBusy(false); } }} busy={busy} />}
           {tab === "products" && <ProductsView products={products} onSaved={async () => { await Promise.all([loadProducts(), loadDashboard()]); notify("상품 정보를 저장했습니다."); }} notify={notify} />}
           {tab === "forms" && <FormBuilder form={form} products={products} onChange={setForm} onSave={async () => { if (!form) return; setBusy(true); try { await api("/api/admin/forms", { method: "PUT", body: JSON.stringify(form) }); notify("주문서를 저장했습니다."); } catch (error) { notify((error as Error).message); } finally { setBusy(false); } }} busy={busy} />}
           {tab === "customers" && <CustomersView customers={customers} />}
@@ -142,10 +174,10 @@ function Metric({ label, value, detail, tone }: { label: string; value: string; 
   return <article className={`metric-card ${tone}`}><img className="metric-icon" src={`/visuals/icons/${icon}.webp`} alt="" /><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function OrdersView({ orders, filter, query, onFilter, onQuery, onSearch, onUpdate, busy }: { orders: Order[]; filter: string; query: string; onFilter: (v: string) => void; onQuery: (v: string) => void; onSearch: () => void; onUpdate: (id: string, status: OrderStatus, paymentStatus?: string) => void; busy: boolean }) {
+function OrdersView({ orders, filter, query, nextCursor, onFilter, onQuery, onSearch, onLoadMore, onUpdate, busy }: { orders: Order[]; filter: string; query: string; nextCursor: string | null; onFilter: (v: string) => void; onQuery: (v: string) => void; onSearch: () => void; onLoadMore: () => void; onUpdate: (id: string, status: OrderStatus, paymentStatus?: string) => void; busy: boolean }) {
   return <section className="panel data-panel">
     <div className="data-toolbar">
-      <div className="filter-tabs">{["all", ...Object.keys(STATUS_META)].map((status) => <button key={status} className={filter === status ? "active" : ""} onClick={() => onFilter(status)}>{status === "all" ? "전체" : STATUS_META[status as OrderStatus].label}</button>)}</div>
+      <div className="filter-tabs"><span className="live-order-chip">● 15초 자동 갱신</span>{["all", ...Object.keys(STATUS_META)].map((status) => <button key={status} className={filter === status ? "active" : ""} onClick={() => onFilter(status)}>{status === "all" ? "전체" : STATUS_META[status as OrderStatus].label}</button>)}</div>
       <div className="search-box"><input value={query} onChange={(event) => onQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onSearch()} placeholder="주문번호, 고객명, 휴대폰 검색" aria-label="주문 검색" /><button onClick={onSearch}>검색</button></div>
     </div>
     <div className="order-list">
@@ -160,6 +192,7 @@ function OrdersView({ orders, filter, query, onFilter, onQuery, onSearch, onUpda
       </div>)}
       {!orders.length && <EmptyState text="조건에 맞는 주문이 없습니다." />}
     </div>
+    {nextCursor && <div className="load-more-row"><button className="button button-ghost" onClick={onLoadMore} disabled={busy}>이전 주문 60건 더 보기</button></div>}
   </section>;
 }
 

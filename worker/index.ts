@@ -54,6 +54,19 @@ const worker = {
       return secureResponse(Response.json({ error: "요청을 처리하지 못했습니다." }, { status: 500 }), url.pathname);
     }
   },
+  async scheduled(_controller: ScheduledController, env: WorkerEnv, ctx: ExecutionContext): Promise<void> {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    ctx.waitUntil(
+      env.DB.batch([
+        env.DB.prepare(`DELETE FROM submission_events WHERE created_at < ?`).bind(cutoff),
+        env.DB.prepare(`DELETE FROM admin_login_attempts WHERE created_at < ?`).bind(cutoff),
+      ]).then((results) => {
+        console.log(JSON.stringify({ event: "retention_cleanup", changes: results.reduce((total, result) => total + Number(result.meta.changes ?? 0), 0) }));
+      }).catch((error: unknown) => {
+        console.error(JSON.stringify({ event: "retention_cleanup_failed", error: error instanceof Error ? error.message : String(error) }));
+      }),
+    );
+  },
 };
 
 export default worker;

@@ -83,12 +83,14 @@ export const orders = sqliteTable("orders", {
   shippingFee: integer("shipping_fee").notNull(),
   total: integer("total").notNull(),
   idempotencyKey: text("idempotency_key"),
+  requestHash: text("request_hash"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (table) => [
   index("idx_orders_status_created").on(table.status, table.createdAt),
   index("idx_orders_customer").on(table.customerId, table.createdAt),
   index("idx_orders_created").on(table.createdAt),
+  index("idx_orders_created_id").on(table.createdAt, table.id),
   uniqueIndex("idx_orders_idempotency_key").on(table.idempotencyKey),
 ]);
 
@@ -116,9 +118,15 @@ export const activityLogs = sqliteTable("activity_logs", {
 export const submissionEvents = sqliteTable("submission_events", {
   fingerprint: text("fingerprint").notNull(),
   createdAt: text("created_at").notNull(),
-}, (table) => [index("idx_submission_events_lookup").on(table.fingerprint, table.createdAt)]);
+}, (table) => [
+  index("idx_submission_events_lookup").on(table.fingerprint, table.createdAt),
+  index("idx_submission_events_created").on(table.createdAt),
+]);
 
 export const adminLoginAttempts = sqliteTable("admin_login_attempts", {
   fingerprint: text("fingerprint").notNull(),
   createdAt: text("created_at").notNull(),
-}, (table) => [index("idx_admin_login_attempts_lookup").on(table.fingerprint, table.createdAt)]);
+}, (table) => [
+  index("idx_admin_login_attempts_lookup").on(table.fingerprint, table.createdAt),
+  index("idx_admin_login_attempts_created").on(table.createdAt),
+]);

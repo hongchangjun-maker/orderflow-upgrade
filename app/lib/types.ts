@@ -27,6 +27,7 @@ export type PublicOrderForm = {
     tagline: string;
     phone: string;
     paymentGuide: string;
+    orderCompleteMessage: string;
   };
   products: Product[];
 };

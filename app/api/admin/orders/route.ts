@@ -11,16 +11,34 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const status = url.searchParams.get("status") ?? "all";
     const query = (url.searchParams.get("q") ?? "").trim().slice(0, 80);
-    const before = (url.searchParams.get("before") ?? "").trim().slice(0, 30);
+    const cursor = (url.searchParams.get("cursor") ?? "").trim().slice(0, 100);
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (status !== "all" && statuses.has(status)) { clauses.push("o.status = ?"); params.push(status); }
     if (query) { clauses.push("(o.order_no LIKE ? OR o.customer_name LIKE ? OR o.customer_phone LIKE ?)"); const like = `%${query}%`; params.push(like, like, like); }
-    if (before && /^\d{4}-\d{2}-\d{2}T/u.test(before)) { clauses.push("o.created_at < ?"); params.push(before); }
+    const [cursorCreatedAt, cursorId] = cursor.split("|");
+    if (cursorCreatedAt && cursorId && /^\d{4}-\d{2}-\d{2}T/u.test(cursorCreatedAt) && /^[a-zA-Z0-9-]{8,80}$/u.test(cursorId)) {
+      clauses.push("(o.created_at < ? OR (o.created_at = ? AND o.id < ?))");
+      params.push(cursorCreatedAt, cursorCreatedAt, cursorId);
+    }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-    const rows = await db.prepare(`SELECT o.id, o.order_no AS orderNo, o.customer_name AS customerName, o.customer_phone AS customerPhone, o.delivery_method AS deliveryMethod, o.payment_method AS paymentMethod, o.payment_status AS paymentStatus, o.status, o.total, o.request_note AS requestNote, o.created_at AS createdAt, COALESCE((SELECT GROUP_CONCAT(oi.product_name || ' × ' || oi.quantity, ', ') FROM order_items oi WHERE oi.order_id = o.id), '') AS items FROM orders o ${where} ORDER BY o.created_at DESC LIMIT 60`).bind(...params).all();
-    const last = rows.results.at(-1) as { createdAt?: string } | undefined;
-    return Response.json({ orders: rows.results, nextCursor: rows.results.length === 60 ? last?.createdAt ?? null : null }, { headers: { "Cache-Control": "no-store" } });
+    const rows = await db.prepare(`
+      WITH page AS (
+        SELECT o.id, o.order_no AS orderNo, o.customer_name AS customerName, o.customer_phone AS customerPhone,
+          o.delivery_method AS deliveryMethod, o.payment_method AS paymentMethod, o.payment_status AS paymentStatus,
+          o.status, o.total, o.request_note AS requestNote, o.created_at AS createdAt
+        FROM orders o ${where}
+        ORDER BY o.created_at DESC, o.id DESC LIMIT 61
+      )
+      SELECT page.*, COALESCE(GROUP_CONCAT(oi.product_name || ' × ' || oi.quantity, ', '), '') AS items
+      FROM page LEFT JOIN order_items oi ON oi.order_id = page.id
+      GROUP BY page.id ORDER BY page.createdAt DESC, page.id DESC
+    `).bind(...params).all();
+    const hasMore = rows.results.length > 60;
+    const orders = rows.results.slice(0, 60);
+    const last = orders.at(-1) as { createdAt?: string; id?: string } | undefined;
+    const nextCursor = hasMore && last?.createdAt && last.id ? `${last.createdAt}|${last.id}` : null;
+    return Response.json({ orders, nextCursor }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return jsonError(error);
   }

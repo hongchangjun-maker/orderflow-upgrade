@@ -29,6 +29,13 @@
       "when": 1786331673839,
       "tag": "0003_condemned_calypso",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788315765793,
+      "tag": "0004_noisy_cerebro",
+      "breakpoints": true
     }
   ]
 }

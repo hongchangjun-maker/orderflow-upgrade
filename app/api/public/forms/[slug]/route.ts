@@ -13,7 +13,7 @@ export async function GET(
       .first<Record<string, unknown>>();
     if (!form) return Response.json({ error: "열려 있는 주문서를 찾을 수 없습니다." }, { status: 404 });
 
-    const shop = await db.prepare(`SELECT name, tagline, phone, payment_guide AS paymentGuide FROM shops WHERE id = 'main'`).first();
+    const shop = await db.prepare(`SELECT name, tagline, phone, payment_guide AS paymentGuide, order_complete_message AS orderCompleteMessage FROM shops WHERE id = 'main'`).first();
     const products = await db
       .prepare(`SELECT p.id, p.name, p.category, p.unit, p.price, p.stock, p.low_stock_at AS lowStockAt, p.icon, p.description, p.active, p.sort_order AS sortOrder FROM products p JOIN form_products fp ON fp.product_id = p.id WHERE fp.form_id = ? AND p.active = 1 ORDER BY fp.sort_order, p.sort_order`)
       .bind(form.id)
@@ -21,7 +21,7 @@ export async function GET(
 
     return Response.json(
       { form: { ...form, shop, products: products.results } },
-      { headers: { "Cache-Control": "public, max-age=15, stale-while-revalidate=30" } },
+      { headers: { "Cache-Control": "public, max-age=15, stale-while-revalidate=30", "CDN-Cache-Control": "public, max-age=15, stale-while-revalidate=30" } },
     );
   } catch (error) {
     return jsonError(error);
