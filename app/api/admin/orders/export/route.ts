@@ -2,6 +2,7 @@ import { requireAdminApi } from "../../../../lib/auth";
 import { ensureDatabase, jsonError } from "../../../../lib/data";
 
 const statuses = new Set(["new", "confirmed", "packing", "shipping", "done", "cancelled"]);
+const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/u.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00+09:00`));
 const csvCell = (value: unknown) => {
   let text = String(value ?? "");
   if (/^[=+\-@]/u.test(text)) text = `'${text}`;
@@ -20,6 +21,10 @@ export async function GET(request: Request) {
     const params: unknown[] = [];
     if (status !== "all" && statuses.has(status)) { clauses.push("o.status = ?"); params.push(status); }
     if (query) { const like = `%${query}%`; clauses.push("(o.order_no LIKE ? OR o.customer_name LIKE ? OR o.customer_phone LIKE ?)"); params.push(like, like, like); }
+    const dateFrom = (url.searchParams.get("dateFrom") ?? "").trim();
+    const dateTo = (url.searchParams.get("dateTo") ?? "").trim();
+    if (validDate(dateFrom)) { clauses.push("o.created_at >= ?"); params.push(new Date(`${dateFrom}T00:00:00+09:00`).toISOString()); }
+    if (validDate(dateTo)) { clauses.push("o.created_at < ?"); params.push(new Date(Date.parse(`${dateTo}T00:00:00+09:00`) + 86_400_000).toISOString()); }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const rows = await db.prepare(`
       SELECT o.order_no AS orderNo, o.created_at AS createdAt, o.customer_name AS customerName,

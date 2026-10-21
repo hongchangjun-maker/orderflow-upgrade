@@ -1,7 +1,23 @@
 import { requireAdminApi } from "../../../lib/auth";
 import { ensureDatabase, jsonError } from "../../../lib/data";
+import { validateMutationRequest } from "../../../lib/security";
 
 const statuses = new Set(["new", "confirmed", "packing", "shipping", "done", "cancelled"]);
+const validId = (value: unknown): value is string => typeof value === "string" && /^[a-zA-Z0-9-]{8,80}$/u.test(value);
+const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/u.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00+09:00`));
+
+function appendDateRange(url: URL, clauses: string[], params: unknown[]) {
+  const dateFrom = (url.searchParams.get("dateFrom") ?? "").trim();
+  const dateTo = (url.searchParams.get("dateTo") ?? "").trim();
+  if (validDate(dateFrom)) {
+    clauses.push("o.created_at >= ?");
+    params.push(new Date(`${dateFrom}T00:00:00+09:00`).toISOString());
+  }
+  if (validDate(dateTo)) {
+    clauses.push("o.created_at < ?");
+    params.push(new Date(Date.parse(`${dateTo}T00:00:00+09:00`) + 86_400_000).toISOString());
+  }
+}
 
 export async function GET(request: Request) {
   const admin = await requireAdminApi();
@@ -16,6 +32,7 @@ export async function GET(request: Request) {
     const params: unknown[] = [];
     if (status !== "all" && statuses.has(status)) { clauses.push("o.status = ?"); params.push(status); }
     if (query) { clauses.push("(o.order_no LIKE ? OR o.customer_name LIKE ? OR o.customer_phone LIKE ?)"); const like = `%${query}%`; params.push(like, like, like); }
+    appendDateRange(url, clauses, params);
     const [cursorCreatedAt, cursorId] = cursor.split("|");
     if (cursorCreatedAt && cursorId && /^\d{4}-\d{2}-\d{2}T/u.test(cursorCreatedAt) && /^[a-zA-Z0-9-]{8,80}$/u.test(cursorId)) {
       clauses.push("(o.created_at < ? OR (o.created_at = ? AND o.id < ?))");
@@ -47,18 +64,29 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   const admin = await requireAdminApi();
   if (admin instanceof Response) return admin;
+  const invalid = validateMutationRequest(request);
+  if (invalid) return invalid;
   try {
-    const payload = (await request.json()) as { id?: string; status?: string; paymentStatus?: string };
-    if (!payload.id || !payload.status || !statuses.has(payload.status)) return Response.json({ error: "변경할 주문 상태를 확인해 주세요." }, { status: 400 });
+    const payload = (await request.json()) as { id?: string; ids?: unknown; status?: string; paymentStatus?: string };
+    const ids = Array.isArray(payload.ids)
+      ? [...new Set(payload.ids.filter(validId))].slice(0, 100)
+      : validId(payload.id) ? [payload.id] : [];
+    const status = payload.status && statuses.has(payload.status) ? payload.status : null;
     const paymentStatus = payload.paymentStatus === "paid" ? "paid" : payload.paymentStatus === "unpaid" ? "unpaid" : null;
+    if (!ids.length || (!status && !paymentStatus)) return Response.json({ error: "변경할 주문과 상태를 확인해 주세요." }, { status: 400 });
     const db = await ensureDatabase();
     const now = new Date().toISOString();
-    const result = paymentStatus
-      ? await db.prepare(`UPDATE orders SET status = ?, payment_status = ?, updated_at = ? WHERE id = ?`).bind(payload.status, paymentStatus, now, payload.id).run()
-      : await db.prepare(`UPDATE orders SET status = ?, updated_at = ? WHERE id = ?`).bind(payload.status, now, payload.id).run();
+    const placeholders = ids.map(() => "?").join(",");
+    const result = status && paymentStatus
+      ? await db.prepare(`UPDATE orders SET status = ?, payment_status = ?, updated_at = ? WHERE id IN (${placeholders})`).bind(status, paymentStatus, now, ...ids).run()
+      : status
+        ? await db.prepare(`UPDATE orders SET status = ?, updated_at = ? WHERE id IN (${placeholders})`).bind(status, now, ...ids).run()
+        : await db.prepare(`UPDATE orders SET payment_status = ?, updated_at = ? WHERE id IN (${placeholders})`).bind(paymentStatus, now, ...ids).run();
     if (!result.meta.changes) return Response.json({ error: "주문을 찾을 수 없습니다." }, { status: 404 });
-    await db.prepare(`INSERT INTO activity_logs (action, summary, actor, created_at) VALUES ('order.status', ?, ?, ?)`).bind(`주문 상태를 ${payload.status}(으)로 변경`, admin.email, now).run();
-    return Response.json({ ok: true });
+    const changes = Number(result.meta.changes);
+    const changeLabel = [status ? `주문 상태 ${status}` : "", paymentStatus ? `입금 상태 ${paymentStatus}` : ""].filter(Boolean).join(" · ");
+    await db.prepare(`INSERT INTO activity_logs (action, summary, actor, created_at) VALUES ('order.batch.updated', ?, ?, ?)`).bind(`${changes}건 ${changeLabel}(으)로 변경`, admin.email, now).run();
+    return Response.json({ ok: true, changes });
   } catch (error) {
     return jsonError(error);
   }

@@ -38,3 +38,19 @@ test("ships product metadata and removes disposable starter assets", async () =>
   await access(new URL("../public/visuals/orderflow-mark.webp", import.meta.url));
   assert.doesNotMatch(`${layout}\n${page}`, /chatgpt\.site|signin-with-chatgpt|site-creator/i);
 });
+
+test("keeps familiar bulk order workflows on the new authenticated API", async () => {
+  const [workbench, orderRoute, orderForm] = await Promise.all([
+    readFile(new URL("../app/admin/orders-workbench.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/orders/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/order/[slug]/order-form.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(workbench, /간편 모드/);
+  assert.match(workbench, /업무 모드/);
+  assert.match(workbench, /상태 일괄 변경/);
+  assert.match(workbench, /조회 기간/);
+  assert.match(orderRoute, /validateMutationRequest/);
+  assert.match(orderRoute, /slice\(0, 100\)/);
+  assert.match(orderForm, /사진 크게/);
+  assert.match(orderForm, /빠른 주문/);
+});

@@ -15,6 +15,8 @@ export function OrderFormApp({ slug }: { slug: string }) {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [category, setCategory] = useState("전체");
   const [query, setQuery] = useState("");
+  const [catalogMode, setCatalogMode] = useState<"photo" | "quick">("photo");
+  const [selectedOnly, setSelectedOnly] = useState(false);
   const [checkout, setCheckout] = useState<Checkout>(EMPTY_CHECKOUT);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -49,6 +51,8 @@ export function OrderFormApp({ slug }: { slug: string }) {
           if (draft.quantities) setQuantities(draft.quantities);
         } catch { sessionStorage.removeItem(`orderflow-draft:${slug}`); }
       }
+      const savedCatalogMode = localStorage.getItem("orderflow:catalog-mode");
+      if (savedCatalogMode === "photo" || savedCatalogMode === "quick") setCatalogMode(savedCatalogMode);
     }, 0);
     return () => window.clearTimeout(timer);
     // loadForm is intentionally scoped to the current slug.
@@ -65,7 +69,7 @@ export function OrderFormApp({ slug }: { slug: string }) {
   const shippingFee = !form || checkout.deliveryMethod === "pickup" || (form.freeShippingAt > 0 && subtotal >= form.freeShippingAt) ? 0 : form.shippingFee;
   const total = subtotal + shippingFee;
   const categories = useMemo(() => ["전체", ...new Set(form?.products.map((product) => product.category) ?? [])], [form]);
-  const visibleProducts = form?.products.filter((product) => (category === "전체" || product.category === category) && product.name.toLowerCase().includes(query.toLowerCase())) ?? [];
+  const visibleProducts = form?.products.filter((product) => (category === "전체" || product.category === category) && product.name.toLowerCase().includes(query.toLowerCase()) && (!selectedOnly || (quantities[product.id] ?? 0) > 0)) ?? [];
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
 
   const adjust = (product: Product, delta: number) => {
@@ -75,6 +79,10 @@ export function OrderFormApp({ slug }: { slug: string }) {
   const change = <K extends keyof Checkout>(key: K, value: Checkout[K]) => {
     setIdempotencyKey(crypto.randomUUID());
     setCheckout((current) => ({ ...current, [key]: value }));
+  };
+  const changeCatalogMode = (value: "photo" | "quick") => {
+    setCatalogMode(value);
+    try { localStorage.setItem("orderflow:catalog-mode", value); } catch { /* 저장이 차단되면 현재 화면에서만 유지합니다. */ }
   };
 
   const validate = () => {
@@ -125,8 +133,9 @@ export function OrderFormApp({ slug }: { slug: string }) {
       <section className="store-hero"><div><p className="eyebrow">WEEKLY MARKET · 바로 주문</p><h1>{form.title}</h1><p>{form.shop.tagline}</p></div><div className="store-notice"><span>안내</span><p>{form.notice}</p></div></section>
       <div className="store-layout">
         <section className="catalog-section">
+          <div className="catalog-view-controls"><div><b>상품 보기</b><button className={catalogMode === "photo" ? "active" : ""} onClick={() => changeCatalogMode("photo")}>사진 크게</button><button className={catalogMode === "quick" ? "active" : ""} onClick={() => changeCatalogMode("quick")}>빠른 주문</button></div><label><input type="checkbox" checked={selectedOnly} onChange={(event) => setSelectedOnly(event.target.checked)} /> 담은 상품만</label></div>
           <div className="catalog-toolbar"><div className="category-tabs">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div><label className="catalog-search"><img src="/visuals/icons/search.webp" alt="" /><input aria-label="상품 검색" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="상품 검색" /></label></div>
-          <div className="product-grid">{visibleProducts.map((product) => { const quantity = quantities[product.id] ?? 0; const soldOut = product.stock === 0; return <article className={`store-product ${soldOut ? "sold-out" : ""}`} key={product.id}>
+          <div className={`product-grid catalog-${catalogMode}`}>{visibleProducts.map((product) => { const quantity = quantities[product.id] ?? 0; const soldOut = product.stock === 0; return <article className={`store-product ${soldOut ? "sold-out" : ""}`} key={product.id}>
             <div className="product-visual"><img src={productImage(product.id)} alt={`${product.name} 상품 사진`} loading="lazy" onError={(event) => { event.currentTarget.src = "/visuals/icons/products.webp"; }} />{product.stock <= product.lowStockAt && product.stock > 0 && <em>마감 임박</em>}{soldOut && <em>품절</em>}</div>
             <div className="product-copy"><small>{product.category} · {product.unit}</small><h2>{product.name}</h2><p>{product.description}</p><div className="product-bottom"><strong>{won(product.price)}</strong>{quantity > 0 ? <div className="stepper"><button onClick={() => adjust(product, -1)} aria-label={`${product.name} 수량 줄이기`}>−</button><b>{quantity}</b><button onClick={() => adjust(product, 1)} aria-label={`${product.name} 수량 늘리기`}>+</button></div> : <button className="add-button" onClick={() => adjust(product, 1)} disabled={soldOut}>담기 +</button>}</div></div>
           </article>; })}</div>
