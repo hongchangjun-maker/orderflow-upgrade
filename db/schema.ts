@@ -130,3 +130,58 @@ export const adminLoginAttempts = sqliteTable("admin_login_attempts", {
   index("idx_admin_login_attempts_lookup").on(table.fingerprint, table.createdAt),
   index("idx_admin_login_attempts_created").on(table.createdAt),
 ]);
+
+export const deliveryRuns = sqliteTable("delivery_runs", {
+  id: text("id").primaryKey(),
+  serviceDate: text("service_date").notNull(),
+  title: text("title").notNull(),
+  status: text("status").notNull().default("planned"),
+  createdBy: text("created_by").notNull(),
+  startedAt: text("started_at"),
+  completedAt: text("completed_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [index("idx_delivery_runs_date_status").on(table.serviceDate, table.status)]);
+
+export const deliveryStops = sqliteTable("delivery_stops", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  orderId: text("order_id").notNull().unique(),
+  sequence: integer("sequence").notNull(),
+  status: text("status").notNull().default("waiting"),
+  note: text("note").notNull().default(""),
+  arrivedAt: text("arrived_at"),
+  completedAt: text("completed_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [index("idx_delivery_stops_run_sequence").on(table.runId, table.sequence)]);
+
+export const messageTemplates = sqliteTable("message_templates", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  kind: text("kind").notNull(),
+  body: text("body").notNull(),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [index("idx_message_templates_active").on(table.active, table.updatedAt)]);
+
+export const messageOutbox = sqliteTable("message_outbox", {
+  id: text("id").primaryKey(),
+  templateId: text("template_id"),
+  customerId: text("customer_id"),
+  orderId: text("order_id"),
+  recipientName: text("recipient_name").notNull(),
+  recipientPhone: text("recipient_phone").notNull(),
+  body: text("body").notNull(),
+  status: text("status").notNull().default("draft"),
+  provider: text("provider").notNull().default("unconfigured"),
+  scheduledAt: text("scheduled_at"),
+  sentAt: text("sent_at"),
+  errorMessage: text("error_message"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  index("idx_message_outbox_status_created").on(table.status, table.createdAt),
+  index("idx_message_outbox_order").on(table.orderId),
+]);

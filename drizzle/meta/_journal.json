@@ -36,6 +36,13 @@
       "when": 1788315765793,
       "tag": "0004_noisy_cerebro",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792579335487,
+      "tag": "0005_fair_thanos",
+      "breakpoints": true
     }
   ]
 }

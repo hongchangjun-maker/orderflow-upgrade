@@ -3,8 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { STATUS_META, type OrderStatus, type Product } from "../lib/types";
+import { AnalyticsView } from "./analytics-view";
+import { adminApi as api } from "./client-api";
+import { CustomersView } from "./customers-view";
+import { OperationsView } from "./operations-view";
+import { OrderDetailDrawer } from "./order-detail-drawer";
 
-type Tab = "dashboard" | "orders" | "products" | "forms" | "customers" | "analytics" | "settings";
+type Tab = "dashboard" | "orders" | "products" | "forms" | "customers" | "operations" | "analytics" | "settings";
 type Dashboard = {
   metrics: { ordersToday: number; salesToday: number; openOrders: number; lowStock: number };
   statuses: Array<{ status: OrderStatus; count: number }>;
@@ -16,7 +21,6 @@ type Order = {
   paymentMethod: string; paymentStatus: string; status: OrderStatus; total: number; requestNote: string;
   createdAt: string; items: string;
 };
-type Customer = { id: string; name: string; phone: string; address: string; orderCount: number; totalSpent: number; points: number; lastOrderedAt: string | null };
 type FormConfig = { id: string; slug: string; title: string; notice: string; minOrderAmount: number; shippingFee: number; freeShippingAt: number; active: boolean; productIds: string[] };
 type ShopSettings = { name: string; tagline: string; phone: string; paymentGuide: string; orderCompleteMessage: string };
 
@@ -26,6 +30,7 @@ const menu: Array<{ id: Tab; label: string; icon: string }> = [
   { id: "products", label: "상품·재고", icon: "products" },
   { id: "forms", label: "주문서 만들기", icon: "forms" },
   { id: "customers", label: "고객", icon: "customers" },
+  { id: "operations", label: "배송·메시지", icon: "delivery" },
   { id: "analytics", label: "매출 분석", icon: "analytics" },
   { id: "settings", label: "설정", icon: "settings" },
 ];
@@ -34,19 +39,11 @@ const won = (value: number) => `${Number(value || 0).toLocaleString("ko-KR")}원
 const shortTime = (value: string | null) => value ? new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)) : "-";
 const productImage = (id: string) => `/visuals/products/${id.replace("prod-", "")}.webp`;
 
-async function api<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, { ...options, headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) }, cache: "no-store" });
-  const data = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(data.error ?? "요청을 처리하지 못했습니다.");
-  return data;
-}
-
 export function AdminApp({ user }: { user: { name: string; email: string } }) {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
   const [form, setForm] = useState<FormConfig | null>(null);
   const [settings, setSettings] = useState<ShopSettings | null>(null);
   const [busy, setBusy] = useState(false);
@@ -56,7 +53,7 @@ export function AdminApp({ user }: { user: { name: string; email: string } }) {
   const [nextOrderCursor, setNextOrderCursor] = useState<string | null>(null);
   const latestOrderId = useRef<string | null>(null);
 
-  const notify = (value: string) => { setMessage(value); window.setTimeout(() => setMessage(""), 2500); };
+  const notify = useCallback((value: string) => { setMessage(value); window.setTimeout(() => setMessage(""), 2500); }, []);
   const loadDashboard = useCallback(async () => setDashboard((await api<{ metrics: Dashboard["metrics"]; statuses: Dashboard["statuses"]; topProducts: Dashboard["topProducts"]; activities: Dashboard["activities"] }>("/api/admin/dashboard"))), []);
   const loadOrders = useCallback(async () => {
     const data = await api<{ orders: Order[]; nextCursor: string | null }>(`/api/admin/orders?status=${orderFilter}&q=${encodeURIComponent(orderQuery)}`);
@@ -71,21 +68,20 @@ export function AdminApp({ user }: { user: { name: string; email: string } }) {
     setNextOrderCursor(data.nextCursor);
   };
   const loadProducts = useCallback(async () => setProducts((await api<{ products: Product[] }>("/api/admin/products")).products.map((product) => ({ ...product, active: Boolean(product.active) }))), []);
-  const loadCustomers = useCallback(async () => setCustomers((await api<{ customers: Customer[] }>("/api/admin/customers")).customers), []);
   const loadForm = useCallback(async () => setForm((await api<{ form: FormConfig }>("/api/admin/forms")).form), []);
   const loadSettings = useCallback(async () => setSettings((await api<{ settings: ShopSettings }>("/api/admin/settings")).settings), []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => loadDashboard().catch((error) => notify(error.message)), 0);
     return () => window.clearTimeout(timer);
-  }, [loadDashboard]);
+  }, [loadDashboard, notify]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const task = tab === "orders" ? loadOrders() : tab === "products" ? loadProducts() : tab === "customers" ? loadCustomers() : tab === "forms" ? Promise.all([loadForm(), loadProducts()]) : tab === "settings" ? loadSettings() : tab === "analytics" ? loadDashboard() : Promise.resolve();
+      const task = tab === "orders" ? loadOrders() : tab === "products" ? loadProducts() : tab === "forms" ? Promise.all([loadForm(), loadProducts()]) : tab === "settings" ? loadSettings() : Promise.resolve();
       task.catch((error) => notify(error.message));
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [tab, loadOrders, loadProducts, loadCustomers, loadForm, loadSettings, loadDashboard]);
+  }, [tab, loadOrders, loadProducts, loadForm, loadSettings, notify]);
   useEffect(() => {
     if (tab !== "orders") return;
     const poll = window.setInterval(async () => {
@@ -129,11 +125,12 @@ export function AdminApp({ user }: { user: { name: string; email: string } }) {
 
         <div className="admin-content">
           {tab === "dashboard" && <DashboardView dashboard={dashboard} statusCount={statusCount} onMove={setTab} />}
-          {tab === "orders" && <OrdersView orders={orders} filter={orderFilter} query={orderQuery} nextCursor={nextOrderCursor} onFilter={setOrderFilter} onQuery={setOrderQuery} onSearch={loadOrders} onLoadMore={loadMoreOrders} onUpdate={async (id, status, paymentStatus) => { setBusy(true); try { await api("/api/admin/orders", { method: "PATCH", body: JSON.stringify({ id, status, paymentStatus }) }); await Promise.all([loadOrders(), loadDashboard()]); notify("주문 상태를 변경했습니다."); } catch (error) { notify((error as Error).message); } finally { setBusy(false); } }} busy={busy} />}
+          {tab === "orders" && <OrdersView orders={orders} filter={orderFilter} query={orderQuery} nextCursor={nextOrderCursor} onFilter={setOrderFilter} onQuery={setOrderQuery} onSearch={loadOrders} onLoadMore={loadMoreOrders} onUpdate={async (id, status, paymentStatus) => { setBusy(true); try { await api("/api/admin/orders", { method: "PATCH", body: JSON.stringify({ id, status, paymentStatus }) }); await Promise.all([loadOrders(), loadDashboard()]); notify("주문 상태를 변경했습니다."); } catch (error) { notify((error as Error).message); } finally { setBusy(false); } }} busy={busy} notify={notify} />}
           {tab === "products" && <ProductsView products={products} onSaved={async () => { await Promise.all([loadProducts(), loadDashboard()]); notify("상품 정보를 저장했습니다."); }} notify={notify} />}
           {tab === "forms" && <FormBuilder form={form} products={products} onChange={setForm} onSave={async () => { if (!form) return; setBusy(true); try { await api("/api/admin/forms", { method: "PUT", body: JSON.stringify(form) }); notify("주문서를 저장했습니다."); } catch (error) { notify((error as Error).message); } finally { setBusy(false); } }} busy={busy} />}
-          {tab === "customers" && <CustomersView customers={customers} />}
-          {tab === "analytics" && <AnalyticsView dashboard={dashboard} />}
+          {tab === "customers" && <CustomersView notify={notify} />}
+          {tab === "operations" && <OperationsView notify={notify} />}
+          {tab === "analytics" && <AnalyticsView notify={notify} />}
           {tab === "settings" && <SettingsView settings={settings} onChange={setSettings} onSave={async () => { if (!settings) return; setBusy(true); try { await api("/api/admin/settings", { method: "PUT", body: JSON.stringify(settings) }); notify("상점 설정을 저장했습니다."); } catch (error) { notify((error as Error).message); } finally { setBusy(false); } }} busy={busy} />}
         </div>
       </main>
@@ -174,16 +171,17 @@ function Metric({ label, value, detail, tone }: { label: string; value: string; 
   return <article className={`metric-card ${tone}`}><img className="metric-icon" src={`/visuals/icons/${icon}.webp`} alt="" /><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function OrdersView({ orders, filter, query, nextCursor, onFilter, onQuery, onSearch, onLoadMore, onUpdate, busy }: { orders: Order[]; filter: string; query: string; nextCursor: string | null; onFilter: (v: string) => void; onQuery: (v: string) => void; onSearch: () => void; onLoadMore: () => void; onUpdate: (id: string, status: OrderStatus, paymentStatus?: string) => void; busy: boolean }) {
+function OrdersView({ orders, filter, query, nextCursor, onFilter, onQuery, onSearch, onLoadMore, onUpdate, busy, notify }: { orders: Order[]; filter: string; query: string; nextCursor: string | null; onFilter: (v: string) => void; onQuery: (v: string) => void; onSearch: () => void; onLoadMore: () => void; onUpdate: (id: string, status: OrderStatus, paymentStatus?: string) => void; busy: boolean; notify: (value: string) => void }) {
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   return <section className="panel data-panel">
     <div className="data-toolbar">
       <div className="filter-tabs"><span className="live-order-chip">● 15초 자동 갱신</span>{["all", ...Object.keys(STATUS_META)].map((status) => <button key={status} className={filter === status ? "active" : ""} onClick={() => onFilter(status)}>{status === "all" ? "전체" : STATUS_META[status as OrderStatus].label}</button>)}</div>
-      <div className="search-box"><input value={query} onChange={(event) => onQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onSearch()} placeholder="주문번호, 고객명, 휴대폰 검색" aria-label="주문 검색" /><button onClick={onSearch}>검색</button></div>
+      <div className="toolbar-search-actions"><div className="search-box"><input value={query} onChange={(event) => onQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onSearch()} placeholder="주문번호, 고객명, 휴대폰 검색" aria-label="주문 검색" /><button onClick={onSearch}>검색</button></div><a className="button button-ghost" href={`/api/admin/orders/export?status=${filter}&q=${encodeURIComponent(query)}`}>CSV</a></div>
     </div>
     <div className="order-list">
       <div className="order-row order-head"><span>주문</span><span>고객</span><span>상품</span><span>결제</span><span>금액</span><span>상태</span></div>
       {orders.map((order) => <div className="order-row" key={order.id}>
-        <div><b>{order.orderNo}</b><small>{shortTime(order.createdAt)} · {order.deliveryMethod === "delivery" ? "배송" : "픽업"}</small></div>
+        <div><button className="order-link" onClick={() => setSelectedOrderId(order.id)}>{order.orderNo}</button><small>{shortTime(order.createdAt)} · {order.deliveryMethod === "delivery" ? "배송" : "픽업"}</small></div>
         <div><b>{order.customerName}</b><small>{order.customerPhone.replace(/(\d{3})(\d{3,4})(\d{4})/, "$1-$2-$3")}</small></div>
         <div><b className="clamp-one">{order.items || "상품 정보 없음"}</b><small>{order.requestNote || "요청사항 없음"}</small></div>
         <button className={`payment-toggle ${order.paymentStatus === "paid" ? "paid" : ""}`} onClick={() => onUpdate(order.id, order.status, order.paymentStatus === "paid" ? "unpaid" : "paid")} disabled={busy}>{order.paymentStatus === "paid" ? "입금 확인" : "미입금"}</button>
@@ -193,6 +191,7 @@ function OrdersView({ orders, filter, query, nextCursor, onFilter, onQuery, onSe
       {!orders.length && <EmptyState text="조건에 맞는 주문이 없습니다." />}
     </div>
     {nextCursor && <div className="load-more-row"><button className="button button-ghost" onClick={onLoadMore} disabled={busy}>이전 주문 60건 더 보기</button></div>}
+    {selectedOrderId && <OrderDetailDrawer orderId={selectedOrderId} onClose={() => setSelectedOrderId(null)} notify={notify} />}
   </section>;
 }
 
@@ -237,19 +236,6 @@ function FormBuilder({ form, products, onChange, onSave, busy }: { form: FormCon
       <button className="button button-primary button-full" onClick={onSave} disabled={busy}>{busy ? "저장 중..." : "주문서 저장"}</button>
     </section>
   </div>;
-}
-
-function CustomersView({ customers }: { customers: Customer[] }) {
-  return <section className="panel data-panel"><div className="panel-head"><div><p className="eyebrow">CUSTOMERS</p><h2>고객 주문 이력</h2></div><span className="state-chip on">{customers.length}명</span></div>
-    <div className="customer-grid">{customers.map((customer) => <article key={customer.id}><span className="customer-avatar"><img src="/visuals/icons/customers.webp" alt="" /></span><div><b>{customer.name}</b><small>{customer.phone}</small><p>{customer.address || "저장된 주소 없음"}</p></div><dl><div><dt>주문</dt><dd>{customer.orderCount}회</dd></div><div><dt>누적</dt><dd>{won(customer.totalSpent)}</dd></div><div><dt>최근</dt><dd>{shortTime(customer.lastOrderedAt)}</dd></div></dl></article>)}</div>
-    {!customers.length && <EmptyState text="첫 주문이 접수되면 고객이 자동으로 등록됩니다." />}
-  </section>;
-}
-
-function AnalyticsView({ dashboard }: { dashboard: Dashboard | null }) {
-  if (!dashboard) return <LoadingState />;
-  const totalQuantity = dashboard.topProducts.reduce((sum, item) => sum + Number(item.quantity), 0);
-  return <div className="analytics-layout"><section className="panel analytics-hero"><p className="eyebrow">REVENUE SNAPSHOT</p><h2>오늘 매출</h2><strong>{won(dashboard.metrics.salesToday)}</strong><p>접수된 주문의 총액입니다. 실제 정산액은 결제 확인 상태와 함께 관리하세요.</p></section><section className="panel"><div className="panel-head"><h2>상품별 주문 비중</h2><b>{totalQuantity}개</b></div><div className="donut-list">{dashboard.topProducts.map((item, index) => <div key={item.name}><span style={{ background: ["#1f5eff", "#11a66a", "#7b55d9", "#ef9d2d", "#df5c5c"][index] }} /><b>{item.name}</b><em>{totalQuantity ? Math.round((item.quantity / totalQuantity) * 100) : 0}%</em></div>)}</div></section><section className="panel analytics-note"><h2>정확한 분석을 위한 원칙</h2><p>매출은 주문 접수 총액과 입금 확인액을 분리해 보세요. 취소 주문은 자동으로 운영 흐름에서 제외하도록 확장할 수 있습니다.</p><div><span>결제 연동</span><b>연결 안 됨</b></div></section></div>;
 }
 
 function SettingsView({ settings, onChange, onSave, busy }: { settings: ShopSettings | null; onChange: (settings: ShopSettings) => void; onSave: () => void; busy: boolean }) {
