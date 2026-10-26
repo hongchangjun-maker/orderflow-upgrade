@@ -4,6 +4,7 @@ import { canonicalOrderRequest, normalizeOrderPayload, OrderInputError, priceOrd
 import { classifyCustomer } from "../app/modules/customers/segments.ts";
 import { applyAdvertisingRules, messageBytes, renderMessageTemplate } from "../app/modules/messages/templates.ts";
 import { canTransitionDeliveryRun, validateDeliveryRunDraft } from "../app/modules/operations/domain.ts";
+import { createDemoOrders, filterDemoOrders, summarizeDemoOrders } from "../app/lib/demo-orders.ts";
 
 const basePayload = {
   formSlug: "fresh-market",
@@ -26,6 +27,30 @@ test("동일 상품 행을 하나로 합쳐 중복 차감을 막는다", () => {
     items: [{ productId: "prod-apple", quantity: 2 }, { productId: "prod-apple", quantity: 3 }],
   });
   assert.deepEqual(normalized.items, [{ productId: "prod-apple", quantity: 5 }]);
+});
+
+test("로그인 없는 시뮬레이션은 최대 2천 건의 고유 가상 주문을 만든다", () => {
+  const orders = createDemoOrders(2_500, 0, Date.parse("2026-10-26T03:00:00.000Z"));
+  assert.equal(orders.length, 2_000);
+  assert.equal(new Set(orders.map((order) => order.id)).size, 2_000);
+  assert.ok(orders.every((order) => order.orderNo.startsWith("SIM-")));
+});
+
+test("가상 주문 검색과 상태·기간 필터가 실제 목록 규칙처럼 함께 적용된다", () => {
+  const orders = createDemoOrders(80, 0, Date.parse("2026-10-26T03:00:00.000Z"));
+  const target = orders.find((order) => order.status === "new");
+  assert.ok(target);
+  const date = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date(target.createdAt));
+  const filtered = filterDemoOrders(orders, "new", target.customerPhone, date, date);
+  assert.ok(filtered.some((order) => order.id === target.id));
+  assert.ok(filtered.every((order) => order.status === "new"));
+});
+
+test("가상 주문 요약은 취소 주문을 매출에서 제외한다", () => {
+  const orders = createDemoOrders(50, 0, Date.parse("2026-10-26T03:00:00.000Z"));
+  const summary = summarizeDemoOrders(orders);
+  assert.equal(summary.total, 50);
+  assert.equal(summary.sales, orders.filter((order) => order.status !== "cancelled").reduce((sum, order) => sum + order.total, 0));
 });
 
 test("배송과 결제 방법이 맞지 않으면 거절한다", () => {

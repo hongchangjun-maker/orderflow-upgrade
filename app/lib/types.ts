@@ -1,5 +1,20 @@
 export type OrderStatus = "new" | "confirmed" | "packing" | "shipping" | "done" | "cancelled";
 
+export type AdminOrder = {
+  id: string;
+  orderNo: string;
+  customerName: string;
+  customerPhone: string;
+  deliveryMethod: string;
+  paymentMethod: string;
+  paymentStatus: string;
+  status: OrderStatus;
+  total: number;
+  requestNote: string;
+  createdAt: string;
+  items: string;
+};
+
 export type Product = {
   id: string;
   name: string;

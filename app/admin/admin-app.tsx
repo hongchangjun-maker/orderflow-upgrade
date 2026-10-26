@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { STATUS_META, type OrderStatus, type Product } from "../lib/types";
+import { STATUS_META, type AdminOrder, type OrderStatus, type Product } from "../lib/types";
 import { AnalyticsView } from "./analytics-view";
 import { adminApi as api } from "./client-api";
 import { CustomersView } from "./customers-view";
 import { OperationsView } from "./operations-view";
-import { OrdersWorkbench, type AdminOrder } from "./orders-workbench";
+import { OrdersWorkbench } from "./orders-workbench";
 
 type Tab = "dashboard" | "orders" | "products" | "forms" | "customers" | "operations" | "analytics" | "settings";
 type Dashboard = {

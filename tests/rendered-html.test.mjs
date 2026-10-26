@@ -54,3 +54,23 @@ test("keeps familiar bulk order workflows on the new authenticated API", async (
   assert.match(orderForm, /사진 크게/);
   assert.match(orderForm, /빠른 주문/);
 });
+
+test("opens a login-free simulation while keeping real administration behind the secure route", async () => {
+  const [adminPage, securePage, demoApp, home] = await Promise.all([
+    readFile(new URL("../app/admin/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/secure/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/demo-admin-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(adminPage, /DemoAdminApp/);
+  assert.doesNotMatch(adminPage, /AdminLogin|getAdminUser/);
+  assert.match(securePage, /AdminLogin/);
+  assert.match(securePage, /getAdminUser/);
+  assert.match(demoApp, /1,000건 부하 구성/);
+  assert.match(demoApp, /실제 D1 주문과 관리자 계정에는 접근하지 않습니다/);
+  assert.match(demoApp, /orderflow-demo-orders\.csv/);
+  assert.match(demoApp, /가상 데이터 즉시 반영/);
+  assert.doesNotMatch(demoApp, /fetch\(/);
+  assert.match(home, /바로 시뮬레이션/);
+  assert.doesNotMatch(home, /관리자 로그인/);
+});

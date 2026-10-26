@@ -1,29 +1,27 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { STATUS_META, type OrderStatus } from "../lib/types";
+import { STATUS_META, type AdminOrder, type OrderStatus } from "../lib/types";
 import { OrderDetailDrawer } from "./order-detail-drawer";
-
-export type AdminOrder = {
-  id: string; orderNo: string; customerName: string; customerPhone: string; deliveryMethod: string;
-  paymentMethod: string; paymentStatus: string; status: OrderStatus; total: number; requestNote: string;
-  createdAt: string; items: string;
-};
 
 type Mode = "simple" | "work";
 type DetailPreferences = { phone: boolean; request: boolean };
 
 const won = (value: number) => `${Number(value || 0).toLocaleString("ko-KR")}원`;
-const shortTime = (value: string) => new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+const shortTime = (value: string) => new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" }).format(new Date(value));
 const kstDate = (date = new Date()) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(date);
 
 export function OrdersWorkbench({
   orders, filter, query, dateFrom, dateTo, nextCursor, onFilter, onQuery, onDateFrom, onDateTo,
-  onLoadMore, onUpdate, busy, notify,
+  onLoadMore, onUpdate, onOpenOrder, onExport, description, autoRefreshLabel = "15초 자동 갱신", busy, notify,
 }: {
   orders: AdminOrder[]; filter: string; query: string; dateFrom: string; dateTo: string; nextCursor: string | null;
   onFilter: (value: string) => void; onQuery: (value: string) => void; onDateFrom: (value: string) => void; onDateTo: (value: string) => void;
   onLoadMore: () => void; onUpdate: (ids: string[], status?: OrderStatus, paymentStatus?: "paid" | "unpaid") => Promise<void>;
+  onOpenOrder?: (order: AdminOrder) => void;
+  onExport?: () => void;
+  description?: string;
+  autoRefreshLabel?: string;
   busy: boolean; notify: (value: string) => void;
 }) {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
@@ -65,13 +63,15 @@ export function OrdersWorkbench({
   const toggleAll = () => setSelected(allSelected ? selected.filter((id) => !orders.some((order) => order.id === id)) : [...new Set([...selected, ...orders.map((order) => order.id)])]);
   const runBulk = async (status?: OrderStatus, paymentStatus?: "paid" | "unpaid") => {
     if (!selected.length) return notify("처리할 주문을 먼저 선택해 주세요.");
-    await onUpdate(selected, status, paymentStatus);
+    const targets = selected.slice(0, 100);
+    if (selected.length > 100) notify("한 번에 최대 100건까지만 처리합니다.");
+    await onUpdate(targets, status, paymentStatus);
     setSelected([]);
   };
 
   return <section className={`panel data-panel order-workbench mode-${mode}`}>
     <header className="legacy-workbench-head">
-      <div><p className="eyebrow">ORDER DESK</p><h2>주문 통합 관리</h2><p>기존 업무형 목록의 빠른 처리 방식과 새 ORDERFLOW의 안전한 동시 주문 엔진을 함께 사용합니다.</p></div>
+      <div><p className="eyebrow">ORDER DESK</p><h2>주문 통합 관리</h2><p>{description ?? "기존 업무형 목록의 빠른 처리 방식과 새 ORDERFLOW의 안전한 동시 주문 엔진을 함께 사용합니다."}</p></div>
       <div className="view-mode-toggle" role="group" aria-label="주문 화면 모드"><button className={mode === "simple" ? "active" : ""} onClick={() => setViewMode("simple")}>간편 모드</button><button className={mode === "work" ? "active" : ""} onClick={() => setViewMode("work")}>업무 모드</button></div>
     </header>
 
@@ -81,12 +81,12 @@ export function OrdersWorkbench({
       <label><span>종료일</span><input type="date" value={dateTo} onChange={(event) => onDateTo(event.target.value)} /></label>
       <div className="search-box"><input value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} onKeyDown={(event) => event.key === "Enter" && applySearch()} placeholder="주문번호, 고객명, 휴대폰" aria-label="주문 검색" /><button onClick={applySearch}>검색</button></div>
       <button className="button button-ghost preference-button" onClick={() => setShowPreferences((value) => !value)}>표시 설정</button>
-      <a className="button button-ghost" href={`/api/admin/orders/export?${exportParams.toString()}`}>엑셀용 CSV</a>
+      {onExport ? <button className="button button-ghost" onClick={onExport}>엑셀용 CSV</button> : <a className="button button-ghost" href={`/api/admin/orders/export?${exportParams.toString()}`}>엑셀용 CSV</a>}
     </div>
     {showPreferences && <div className="order-display-preferences"><b>목록에 표시</b><label><input type="checkbox" checked={preferences.phone} onChange={(event) => updatePreferences("phone", event.target.checked)} /> 휴대폰</label><label><input type="checkbox" checked={preferences.request} onChange={(event) => updatePreferences("request", event.target.checked)} /> 요청사항</label><button onClick={() => setShowPreferences(false)}>완료</button></div>}
 
     <div className="data-toolbar legacy-status-toolbar">
-      <div className="filter-tabs"><span className="live-order-chip">● 15초 자동 갱신</span>{["all", ...Object.keys(STATUS_META)].map((status) => <button key={status} className={filter === status ? "active" : ""} onClick={() => onFilter(status)}>{status === "all" ? "전체" : STATUS_META[status as OrderStatus].label}</button>)}</div>
+      <div className="filter-tabs"><span className="live-order-chip">● {autoRefreshLabel}</span>{["all", ...Object.keys(STATUS_META)].map((status) => <button key={status} className={filter === status ? "active" : ""} onClick={() => onFilter(status)}>{status === "all" ? "전체" : STATUS_META[status as OrderStatus].label}</button>)}</div>
       <span className="result-count">현재 {orders.length}건</span>
     </div>
 
@@ -96,7 +96,7 @@ export function OrdersWorkbench({
       <div className="order-row order-head"><label><input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="현재 주문 전체 선택" /></label><span>주문</span><span>고객</span><span>주문 품목</span><span>입금</span><span>합계</span><span>처리 상태</span></div>
       {orders.map((order) => <div className={`order-row ${selectedSet.has(order.id) ? "selected" : ""}`} key={order.id}>
         <label className="order-select"><input type="checkbox" checked={selectedSet.has(order.id)} onChange={() => toggle(order.id)} aria-label={`${order.orderNo} 선택`} /></label>
-        <div><button className="order-link" onClick={() => setSelectedOrderId(order.id)}>{order.orderNo}</button><small>{shortTime(order.createdAt)} · {order.deliveryMethod === "delivery" ? "배송" : "픽업"}</small></div>
+        <div><button className="order-link" onClick={() => onOpenOrder ? onOpenOrder(order) : setSelectedOrderId(order.id)}>{order.orderNo}</button><small>{shortTime(order.createdAt)} · {order.deliveryMethod === "delivery" ? "배송" : "픽업"}</small></div>
         <div><b>{order.customerName}</b>{preferences.phone && <small>{order.customerPhone.replace(/(\d{3})(\d{3,4})(\d{4})/, "$1-$2-$3")}</small>}</div>
         <div><b className="clamp-one">{order.items || "상품 정보 없음"}</b>{preferences.request && <small>{order.requestNote || "요청사항 없음"}</small>}</div>
         <button className={`payment-toggle ${order.paymentStatus === "paid" ? "paid" : ""}`} onClick={() => onUpdate([order.id], undefined, order.paymentStatus === "paid" ? "unpaid" : "paid")} disabled={busy}>{order.paymentStatus === "paid" ? "입금 확인" : "미입금"}</button>
@@ -106,6 +106,6 @@ export function OrdersWorkbench({
       {!orders.length && <div className="empty-state"><span><img src="/visuals/icons/orders.webp" alt="" /></span><p>조회 조건에 맞는 주문이 없습니다.</p></div>}
     </div>
     {nextCursor && <div className="load-more-row"><button className="button button-ghost" onClick={onLoadMore} disabled={busy}>이전 주문 60건 더 보기</button></div>}
-    {selectedOrderId && <OrderDetailDrawer orderId={selectedOrderId} onClose={() => setSelectedOrderId(null)} notify={notify} />}
+    {!onOpenOrder && selectedOrderId && <OrderDetailDrawer orderId={selectedOrderId} onClose={() => setSelectedOrderId(null)} notify={notify} />}
   </section>;
 }

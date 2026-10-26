@@ -13,7 +13,7 @@ export default function Home() {
   return <main className="landing-shell premium-landing">
     <nav className="landing-nav">
       <Link href="/" className="brand-lockup" aria-label="오더플로우 홈"><img src="/visuals/orderflow-mark.webp" alt="" /><span>ORDERFLOW</span></Link>
-      <div className="landing-nav-actions"><span className="system-chip"><i /> 운영 준비 완료</span><Link href="/admin" className="button button-ghost">관리자 로그인</Link></div>
+      <div className="landing-nav-actions"><span className="system-chip"><i /> 운영 준비 완료</span><Link href="/admin" className="button button-ghost">바로 시뮬레이션</Link></div>
     </nav>
 
     <section className="premium-hero">
@@ -23,7 +23,7 @@ export default function Home() {
         <p className="eyebrow gold">THE NEW STANDARD OF ORDER OPERATIONS</p>
         <h1>주문은 더 쉽게.<br /><em>운영은 더 우아하게.</em></h1>
         <p>사진을 보고 바로 주문하는 고객 경험부터 실시간 재고, 주문 처리, 고객과 매출 관리까지. 성장하는 판매자를 위해 완성한 프리미엄 주문 운영 플랫폼입니다.</p>
-        <div className="hero-actions"><Link href="/order/fresh-market" className="button button-gold button-large">실사 주문서 열기 <span>→</span></Link><Link href="/admin" className="button button-glass button-large">운영 화면 보기</Link></div>
+        <div className="hero-actions"><Link href="/order/fresh-market" className="button button-gold button-large">실사 주문서 열기 <span>→</span></Link><Link href="/admin" className="button button-glass button-large">로그인 없이 운영 체험</Link></div>
         <div className="hero-proof"><div><strong>EDGE</strong><span>전 세계 빠른 응답</span></div><div><strong>D1</strong><span>안전한 주문 저장</span></div><div><strong>24/7</strong><span>실시간 상태 확인</span></div></div>
       </div>
     </section>
@@ -51,6 +51,6 @@ export default function Home() {
       <div className="premium-feature-grid">{features.map((feature, index) => <article key={feature.title}><div className="feature-image"><img src={`/visuals/icons/${feature.icon}.webp`} alt="" /><span>0{index + 1}</span></div><p className="eyebrow">{feature.eyebrow}</p><h3>{feature.title}</h3><p>{feature.copy}</p></article>)}</div>
     </section>
 
-    <section className="final-cta"><img src="/visuals/orderflow-mark.webp" alt="" /><p className="eyebrow gold">READY FOR YOUR NEXT ORDER</p><h2>오늘 들어오는 주문부터<br />더 좋은 흐름으로 바꾸세요.</h2><div><Link href="/admin" className="button button-gold button-large">운영 시작하기</Link><Link href="/order/fresh-market" className="button button-glass button-large">고객 주문서 보기</Link></div></section>
+    <section className="final-cta"><img src="/visuals/orderflow-mark.webp" alt="" /><p className="eyebrow gold">READY FOR YOUR NEXT ORDER</p><h2>오늘 들어오는 주문부터<br />더 좋은 흐름으로 바꾸세요.</h2><div><Link href="/admin" className="button button-gold button-large">바로 시뮬레이션</Link><Link href="/order/fresh-market" className="button button-glass button-large">고객 주문서 보기</Link></div></section>
   </main>;
 }

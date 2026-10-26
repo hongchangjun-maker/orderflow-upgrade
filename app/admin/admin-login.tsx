@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 
-export function AdminLogin() {
+export function AdminLogin({ redirectTo = "/admin/secure" }: { redirectTo?: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
@@ -16,7 +16,7 @@ export function AdminLogin() {
       const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error ?? "로그인하지 못했습니다.");
-      window.location.replace("/admin");
+      window.location.replace(redirectTo);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "로그인하지 못했습니다.");
     } finally {
