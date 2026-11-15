@@ -238,6 +238,12 @@ assert.equal(
   403,
 );
 pass("staff cannot grant permissions or alter money without grant");
+assert.equal((await api("/logout", {}, "POST", staffCookie)).status, 200);
+assert.equal(
+  (await api("/session", undefined, "GET", staffCookie)).status,
+  401,
+);
+pass("staff logout revokes the actual server session");
 const clashForm = await api("/workspace/form", {
   title: run + "-stock-race",
   itemsText: "검증 경합 품목|개|100|10",

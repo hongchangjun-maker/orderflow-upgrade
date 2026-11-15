@@ -1,4 +1,6 @@
 import { clearedSessionCookie } from "../../lib/auth";
+import { getD1 } from "../../lib/data";
+import { sha256Hex } from "../../lib/security";
 import { context, authorize } from "./context";
 import { accountsApi, liveLogin } from "./accounts";
 import { communicationsApi } from "./communications";
@@ -120,6 +122,17 @@ export async function liveApi(request: Request) {
         throw new LiveError("요청 확인 헤더가 필요합니다.", 403);
     }
     if (path === "/logout" || path === "/auth/logout") {
+      const token = request.headers
+        .get("cookie")
+        ?.split(";")
+        .map((v) => v.trim())
+        .find((v) => v.startsWith("orderflow_staff="))
+        ?.slice(16);
+      if (token)
+        await getD1()
+          .prepare("DELETE FROM of_sessions WHERE hash=?")
+          .bind(await sha256Hex(token))
+          .run();
       const headers = new Headers({ "Cache-Control": "no-store" });
       headers.append("Set-Cookie", clearedSessionCookie());
       headers.append(
