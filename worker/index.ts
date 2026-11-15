@@ -1,6 +1,7 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { runRecurring } from "../app/modules/live/operations";
 
 type WorkerEnv = Env & {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -15,7 +16,7 @@ function secureResponse(response: Response, pathname: string): Response {
   headers.set("Cross-Origin-Opener-Policy", "same-origin");
   headers.set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests");
   if (pathname === "/replica" || pathname.startsWith("/replica/")) {
-    headers.set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+    headers.set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
     headers.set("X-Robots-Tag", "noindex, nofollow");
     headers.set("Cache-Control", "no-store");
   }
@@ -34,7 +35,8 @@ const worker = {
     const url = new URL(request.url);
     if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) {
       const size = Number(request.headers.get("content-length") ?? "0");
-      if (!Number.isFinite(size) || size > 65_536) return secureResponse(Response.json({ error: "요청 내용이 너무 큽니다." }, { status: 413 }), url.pathname);
+      const maxSize=url.pathname.startsWith("/api/replica/")&&/upload|\/logo$/u.test(url.pathname)?2_100_000:65_536;
+      if (!Number.isFinite(size) || size > maxSize) return secureResponse(Response.json({ error: "요청 내용이 너무 큽니다." }, { status: 413 }), url.pathname);
       const origin = request.headers.get("origin");
       if (origin && origin !== url.origin) return secureResponse(Response.json({ error: "허용되지 않은 요청 출처입니다." }, { status: 403 }), url.pathname);
     }
@@ -60,11 +62,15 @@ const worker = {
     }
   },
   async scheduled(_controller: ScheduledController, env: WorkerEnv, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(runRecurring(env.DB).catch(error=>console.error(JSON.stringify({event:"recurring_failed",message:String(error).slice(0,200)}))));
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     ctx.waitUntil(
       env.DB.batch([
         env.DB.prepare(`DELETE FROM submission_events WHERE created_at < ?`).bind(cutoff),
         env.DB.prepare(`DELETE FROM admin_login_attempts WHERE created_at < ?`).bind(cutoff),
+        env.DB.prepare(`DELETE FROM of_submissions WHERE created_at < ?`).bind(cutoff),
+        env.DB.prepare(`DELETE FROM of_sessions WHERE expires_at < ?`).bind(new Date().toISOString()),
+        env.DB.prepare(`DELETE FROM of_changes WHERE created_at < ?`).bind(new Date(Date.now()-30*86400000).toISOString()),
       ]).then((results) => {
         console.log(JSON.stringify({ event: "retention_cleanup", changes: results.reduce((total, result) => total + Number(result.meta.changes ?? 0), 0) }));
       }).catch((error: unknown) => {

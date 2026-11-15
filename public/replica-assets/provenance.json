@@ -11,6 +11,7 @@
   ],
   "limitations": [
     "Shipped frontend only; source backend is unavailable.",
-    "All application requests are local simulations, never actual bank/SMS/payment operations."
+    "Runtime now uses the independent authenticated D1/R2 backend; original backend/data are never contacted.",
+    "Bank/SMS/Kakao/cash-receipt and external geocoding providers are deferred by the owner."
   ]
 }

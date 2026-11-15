@@ -35,5 +35,5 @@ const target = resolve(root, "public/replica-assets");
 await mkdir(target, { recursive: true });
 await writeFile(resolve(target, "application.js"), output);
 await writeFile(resolve(target, "reference.css"), orange(css));
-await writeFile(resolve(target, "provenance.json"), JSON.stringify({ referenceUrl: "https://xn--9y2bw0aj3kmoj8tj.kr/", captured: "2026-11-16", sourceSha256: sha(js), stylesheetSha256: sha(css), outputSha256: sha(output), patches, limitations: ["Shipped frontend only; source backend is unavailable.", "All application requests are local simulations, never actual bank/SMS/payment operations."] }, null, 2));
+await writeFile(resolve(target, "provenance.json"), JSON.stringify({ referenceUrl: "https://xn--9y2bw0aj3kmoj8tj.kr/", captured: "2026-11-16", sourceSha256: sha(js), stylesheetSha256: sha(css), outputSha256: sha(output), patches, limitations: ["Shipped frontend only; source backend is unavailable.", "Runtime now uses the independent authenticated D1/R2 backend; original backend/data are never contacted.", "Bank/SMS/Kakao/cash-receipt and external geocoding providers are deferred by the owner."] }, null, 2));
 console.log(JSON.stringify({ outputSha256: sha(output), bytes: Buffer.byteLength(output), patches }));
