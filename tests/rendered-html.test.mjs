@@ -13,8 +13,19 @@ async function render(pathname = "/") {
   );
 }
 
+test("serves reconstructed UI at its root and nested business routes",async()=>{
+  for(const pathname of ["/replica","/replica/orders","/replica/link-order/v2"]){
+    const response=await render(pathname);
+    assert.equal(response.status,200,pathname);
+    assert.match(await response.text(),/replica-assets\/application\.js/);
+  }
+  const home=await render();
+  assert.ok([302,303,307,308].includes(home.status));
+  assert.match(home.headers.get("location"),/\/replica$/);
+});
+
 test("server-renders the finished ORDERFLOW landing page", async () => {
-  const response = await render();
+  const response = await render("/overview");
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
@@ -27,7 +38,7 @@ test("server-renders the finished ORDERFLOW landing page", async () => {
 test("ships product metadata and removes disposable starter assets", async () => {
   const [layout, page, packageJson] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/overview/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(layout, /og\.webp/);
@@ -60,7 +71,7 @@ test("opens a login-free simulation while keeping real administration behind the
     readFile(new URL("../app/admin/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/admin/secure/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/admin/demo-admin-app.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/overview/page.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(adminPage, /DemoAdminApp/);
   assert.doesNotMatch(adminPage, /AdminLogin|getAdminUser/);

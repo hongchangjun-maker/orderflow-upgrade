@@ -14,6 +14,11 @@ function secureResponse(response: Response, pathname: string): Response {
   headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
   headers.set("Cross-Origin-Opener-Policy", "same-origin");
   headers.set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests");
+  if (pathname === "/replica" || pathname.startsWith("/replica/")) {
+    headers.set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+    headers.set("X-Robots-Tag", "noindex, nofollow");
+    headers.set("Cache-Control", "no-store");
+  }
   if (pathname.startsWith("/admin") || pathname.startsWith("/api/admin")) headers.set("X-Robots-Tag", "noindex, nofollow");
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }

@@ -1,0 +1,16 @@
+{
+  "referenceUrl": "https://xn--9y2bw0aj3kmoj8tj.kr/",
+  "captured": "2026-11-16",
+  "sourceSha256": "fc48b6f9798201f29a16e53f78638c2b6bcd8a6fca07b94d26067d4ca339704c",
+  "stylesheetSha256": "00b13eea0354b34736bc8ac6b70033788653a8fab1a4bf557e3150ae289008b4",
+  "outputSha256": "1f45dd1fe33b9c8dd9334593df18bc5a40f3ee08bc7c6e1f4247729004a719e1",
+  "patches": [
+    "All Axios clients use isolated local adapter",
+    "Preserve original routes inside replica namespace",
+    "Disable original realtime network connection"
+  ],
+  "limitations": [
+    "Shipped frontend only; source backend is unavailable.",
+    "All application requests are local simulations, never actual bank/SMS/payment operations."
+  ]
+}

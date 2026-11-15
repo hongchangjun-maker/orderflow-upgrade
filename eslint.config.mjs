@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "public/replica-assets/application.js",
   ]),
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

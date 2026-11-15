@@ -1,0 +1,4 @@
+# Immutable generated UI bytes include significant trailing spaces inside string literals.
+# Preserve their SHA on Windows; review changes through generator/provenance/tests.
+public/replica-assets/application.js -text -diff
+public/replica-assets/reference.css -text -diff
