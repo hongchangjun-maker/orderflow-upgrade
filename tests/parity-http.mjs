@@ -28,7 +28,8 @@ export async function runParity(base,cookie='',owner){
   await api('/customers/ledger',{mobile,kind:'prepay',delta:50000,operation:'prepay-'+run});
   assert.equal((await request('/api/live-public/form/'+token+'/quote',{...payload,point_used:1000})).status,403);pass('phone-only point/prepay spending rejected');
   const link=ok(await api('/customers/access-link',{mobile,uocode:id}));
-  assert.equal(ok(await request('/api/live-public/customer/'+link.token)).authenticated,false);
+  const lockedProfile=ok(await request('/api/live-public/customer/'+link.token));
+  assert.equal(lockedProfile.authenticated,false);assert.ok(!lockedProfile.mobileMasked.includes(mobile.slice(-4)));assert.equal(lockedProfile.mobile,undefined);
   assert.equal((await request('/api/live-public/customer/'+link.token,{pin:'00000000'})).status,401);
   const profile=await request('/api/live-public/customer/'+link.token,{pin:mobile.slice(-4)});
   assert.equal(ok(profile).pointBalance,5000);

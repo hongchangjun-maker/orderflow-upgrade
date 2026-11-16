@@ -37,7 +37,7 @@ export async function customerProfile(db:D1Database,request:Request,token:string
     verified={shop:String(access.shop),mobile:String(access.mobile),hash};
   }
   const authenticated=!!verified&&verified.hash===hash;
-  const base={authenticated,mobileMasked:String(access.mobile).replace(/(\d{3})\d+(\d{4})/u,'$1-****-$2')};
+  const base={authenticated,mobileMasked:String(access.mobile).replace(/(\d{3})\d+(\d{4})/u,'$1-****-****')};
   if(!authenticated)return Response.json({success:true,data:base},{headers});
   const customer=await db.prepare('SELECT name FROM of_customers WHERE shop=? AND mobile=?').bind(access.shop,access.mobile).first<Doc>();
   const c:LiveContext={db,shop:String(access.shop),actor:'customer',role:'CUSTOMER',permissions:{},origin:new URL(request.url).origin};

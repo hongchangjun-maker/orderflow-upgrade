@@ -3,12 +3,13 @@ import { access, readFile } from "node:fs/promises";
 import test, { before, after } from "node:test";
 import { unstable_dev } from "wrangler";
 import { fileURLToPath } from "node:url";
+import {createHash} from 'node:crypto';
 let testWorker;
 before(async () => {
   testWorker = await unstable_dev(
     fileURLToPath(new URL("../dist/server/index.js", import.meta.url)),
     {
-      config: "wrangler.jsonc",
+      config: "dist/server/wrangler.json",
       local: true,
       persist: false,
       logLevel: "error",
@@ -20,6 +21,15 @@ before(async () => {
 });
 after(async () => {
   await testWorker?.stop();
+});
+test('serves versioned immutable source modules through the actual built asset binding',async()=>{
+  const release=await readFile(new URL('../app/modules/live/release.ts',import.meta.url),'utf8');
+  const version=release.match(/REPLICA_ASSET_VERSION\s*=\s*['"]([^'"]+)['"]/u)?.[1];
+  assert.ok(version);
+  const response=await testWorker.fetch('/replica-assets/'+version+'/application.js');
+  assert.equal(response.status,200);assert.match(response.headers.get('cache-control'),/immutable/u);
+  const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+  assert.equal(hash(new Uint8Array(await response.arrayBuffer())),hash(await readFile(new URL('../public/replica-assets/application.js',import.meta.url))));
 });
 
 async function render(pathname = "/") {
