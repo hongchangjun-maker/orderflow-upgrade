@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {writeFile} from 'node:fs/promises';
+import {verifyUploadBoundary} from './upload-boundary-http.mjs';
 export async function runParity(base,cookie='',owner){
   if(!/^http:\/\/(localhost|127\.0\.0\.1):\d+$/u.test(base)&&base!=='https://orderflow-korea-upgrade-staging.hhongcjun.workers.dev')throw new Error('Parity mutations restricted to local/staging');
   const checks=[],run=crypto.randomUUID(),mobile='010'+String(Date.now()).slice(-8);
@@ -126,15 +127,7 @@ export async function runParity(base,cookie='',owner){
   ok(await api('/orders/status',{orders:allPointOrders.map(r=>({ocodekey:r.data.key})),status:'40'}));
   assert.equal(ok(await api('/customers/prepayment/balance?mobile='+allPointMobile)).balance,30000);assert.equal(ok(await api('/customers/point/balance?mobile='+allPointMobile)).balance,21000);
   pass('simultaneous prepaid point orders use final fee-once payable and cancel refunds exact debits');
-  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jVJkAAAAASUVORK5CYII=','base64');
-  const chunk=Buffer.alloc(10_000_000-png.length);chunk.writeUInt32BE(chunk.length-12,0);chunk.write('ofQa',4);
-  const table=Array.from({length:256},(_,n)=>{let crc=n;for(let i=0;i<8;i++)crc=crc&1?0xedb88320^(crc>>>1):crc>>>1;return crc>>>0;});
-  let crc=0xffffffff;for(const byte of chunk.subarray(4,-4))crc=table[(crc^byte)&255]^(crc>>>8);chunk.writeUInt32BE((crc^0xffffffff)>>>0,chunk.length-4);
-  const large=Buffer.concat([png.subarray(0,-12),chunk,png.subarray(-12)]);
-  const upload=new FormData();upload.set('file',new File([large],'boundary.png',{type:'image/png'}));
-  const uploadResponse=await fetch(base+'/api/replica/images/upload',{method:'POST',headers:{'x-orderflow-request':'1',...(cookie?{cookie}:{})},body:upload});assert.equal(uploadResponse.status,200);
-  const tooLarge=new FormData();tooLarge.set('file',new File([Buffer.alloc(10_000_001)],'over.png',{type:'image/png'}));
-  const over=await fetch(base+'/api/replica/images/upload',{method:'POST',headers:{'x-orderflow-request':'1',...(cookie?{cookie}:{})},body:tooLarge});assert.equal(over.status,413);pass('10MB image boundary accepted and excess rejected');
+  await verifyUploadBoundary(base,cookie);pass('10MB image boundary accepted and excess rejected');
   const inquiry=ok(await api('/inquiry/create',{title:'테스트',content:'원문'}));
   ok(await api('/inquiry/admin/send',{inquiry_id:inquiry.inquiry_id,content:'답변'}));
   assert.equal(ok(await api('/inquiry/messages?inquiry_id='+inquiry.inquiry_id)).at(-1).content,'답변');pass('internal inquiry admin replies persist');

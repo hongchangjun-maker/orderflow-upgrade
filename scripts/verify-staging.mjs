@@ -56,6 +56,8 @@ async function login(email) {
 }
 const cookie = await login(emails[0]),
   second = await login(emails[1]);
+const {verifyUploadBoundary}=await import('../tests/upload-boundary-http.mjs');
+await verifyUploadBoundary(base,cookie);
 const call = async (path, cookie, body) => {
   const r = await fetch(base + "/api/replica" + path, {
     method: body ? "POST" : "GET",
@@ -84,7 +86,7 @@ console.log("PASS staging tenant isolation and real authentication");
 process.env.LIVE_TEST_URL = base;
 process.env.LIVE_TEST_COOKIE = cookie;
 process.env.LIVE_LOAD??='300';
-await import("../tests/live-http.mjs");
+if(process.env.STAGING_PARITY_ONLY!=='1')await import("../tests/live-http.mjs");
 const {runParity}=await import("../tests/parity-http.mjs");
 await runParity(base,cookie,{email:emails[0],password});
-await import('./verify-burst-repeat.mjs');
+if(process.env.STAGING_PARITY_ONLY!=='1')await import('./verify-burst-repeat.mjs');
