@@ -21,3 +21,12 @@
 - 배포 후 운영 점검은 읽기와 의도적으로 거절되는 요청만 사용합니다. 최종 버전·CI는 릴리스 기록에 추가합니다.
 
 공개 테스트 staging에는 실제 문자·결제·은행 공급자 키를 설정하지 않습니다. 외부 연동은 테스트 공개를 종료한 뒤 별도 운영 설정과 승인을 거쳐야 합니다.
+
+## 최종 배포 기록
+
+- 구현 커밋 `6bb98c7`, assets `test-entry-20261117-r2`; frozen application SHA는 이전과 동일합니다.
+- staging 버전 `138f5cac-7ff6-4982-a560-895f4c07fc2a`, 운영 버전 `abffbabf-1c7c-4a36-bc5e-c1ce56df0498`. 독립 기존 D1/R2만 사용했으며 신규 DB 마이그레이션·운영 비밀값 변경은 없습니다.
+- 기본 주소 https://orderflow-korea-upgrade.hhongcjun.workers.dev/ 및 기본 `/sign-in`은 테스트 진입으로 자동 연결합니다. 직접 테스트 주소는 https://orderflow-korea-upgrade-staging.hhongcjun.workers.dev/try 입니다.
+- lint/typecheck/29개 모듈 아키텍처, 단위55/55, 실제 빌드 렌더링·보안8/8, staging 실제 HTTP7/7, 배포 파일 해시와 운영 접근/CSRF/환경 게이트 점검 통과.
+- 구현 GitHub CI: https://github.com/hongchangjun-maker/orderflow-upgrade/actions/runs/43936138004 성공. 로컬 작업 트리와 main에 동일 구현을 반영했습니다.
+- 최종 HTTP 재검증 중 Node 클라이언트의 조회 연결에 `read ECONNRESET`이 한 번 발생해 해당 실행은 실패로 분류했고, 같은 최종 배포 버전에서 전체7개 시나리오를 다시 실행해 통과했습니다. HTTP 오류 응답을 무시하거나 테스트 성공으로 바꾸지 않았습니다.
