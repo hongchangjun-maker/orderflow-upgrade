@@ -1,5 +1,16 @@
 # Internal parity repair — 2026-11-16
 
+## 최종 결과
+
+- 확인된 내부 차이를 우선순위대로 수정하여 독립 운영 앱에 배포했습니다. 원본 사이트·계정·데이터에는 접근하거나 변경하지 않았습니다.
+- 원본형 관리 화면과 메뉴, 주황색 테마, 기존 공개 API·저장 계약을 보존했습니다. 비활성 주문서/품목 정렬, 배송비·포인트·선결제·취소 환급, 배차 저장/완료, 월별 통계·엑셀, 고객 링크·계정 권한, 채팅·첨부·문의 동작을 보완했습니다.
+- 연속 부하에서 실제 D1 과부하를 재현했습니다. 품목 일괄 저장, 주문/재고/원장/알림 기록의 원자적 처리, 주문 전용 중복 방지 재시도로 보완한 뒤 300명×20품목을 세 차례 총900건 성공했습니다. 회차별 p95는6309/6467/6412ms입니다. 수만 명 동시 처리 보장이나 지속 최대 처리량 측정은 아닙니다.
+- 단위51/51, 실제 빌드 렌더링·보안6/6, 기본 HTTP26/26, 원본 계약 대응 HTTP23/23 통과. 실제10MB PNG 저장, 초과 용량 거절, TXT 첨부 다운로드·격리, 계정 비밀번호 회전·기존 세션 무효화도 스테이징에서 검증했습니다.
+- 운영 버전 `eac214db-844b-4190-a3fe-45d76682bf37`: https://orderflow-korea-upgrade.hhongcjun.workers.dev . 운영 점검은 읽기 및 의도적으로 거절되는 보안 요청만 사용했습니다. 운영 매장0/주문0으로 테스트 주문을 섞지 않았습니다.
+- 문자·카카오·은행·현금영수증·카드 등 외부 공급자 연동은 비활성 유지합니다. 원본 비공개 서버 계산 규칙, 모든 고객 화면의 픽셀 동등성, 실제 APK·프린터 호환성은 완전 동등하다고 주장하지 않습니다.
+
+상세 검증·복구 기록은 `LIVE-RELEASE.md`의 최신 릴리스 절을 참조하십시오.
+
 ## Boundary and acceptance
 
 Only the independent checkout, GitHub repository, Worker, D1 `of_` objects and media storage may change. No requests to the original site/accounts/data. External SMS/Kakao/bank/tax/PG/geocoding/push providers remain disabled and must not return false success. Existing orange generated presentation hash and legacy routes/API remain frozen.
