@@ -1,5 +1,7 @@
 # Independent live release — 2026-11-16
 
+Latest internal-parity changes and independent policies: [INTERNAL-PARITY-REPAIR.md](./INTERNAL-PARITY-REPAIR.md). Earlier versions/measurements below remain historical evidence, not a current performance guarantee.
+
 This is a new backend implementation, not a recovered copy of the original private server. Original site/account/data were not accessed or changed. Source UI bytes and orange palette are pinned in provenance. Previous reconstruction evidence remains historical in ORANGE-REPLICA-20261116.md.
 
 ## Active contracts
@@ -11,14 +13,14 @@ This is a new backend implementation, not a recovered copy of the original priva
 - Independent D1 `of_` tables own forms, catalog, customers, orders, line items, ledger, staff, sessions, records and audit changes. D1 batches roll back on guard/stock/balance failures. Indexes support shop/date, children, token and block lookups.
 - Stock reservation/reversal and prepayment cancellation reversal use database triggers. No negative inventory or balance. Final completed/cancelled status cannot reopen. Paid line-item/price changes are rejected. Internal prepayment cancellation restores stored credit; this is NOT a bank refund.
 - Source DTO compatibility includes form/item edit, CAS revisions, order item-name mapping, bulk status/payment, merge/replay, customer balance/history, permissions, shop settings, chat/templates/address book, recurring schedules and delivery plans. Unknown writes fail visibly.
-- Own R2 product-image upload validates magic bytes, JPG/PNG/WebP and 2MB cap. Image links are public bearer URLs, not a private attachment/document vault. Rich-text HTML uses an allowlist sanitizer ([upstream docs](https://github.com/apostrophecms/sanitize-html)).
+- Own R2 upload validates JPG/PNG/WebP structure/dimensions and 10MB file / 10.1MB streamed multipart cap. Chat-only PDF and UTF8 TXT/CSV use download-only opaque file capabilities, attachment/no-store/nosniff/sandbox. This is not full decoding or antivirus. Image/file URLs are bearer capabilities, not a credential-backed document vault. Rich-text HTML uses an allowlist sanitizer ([upstream docs](https://github.com/apostrophecms/sanitize-html)).
 - Recurring orders run every 15 minutes in production with stable per-master/due-day idempotency; a failed schedule records its error. No SMS/Kakao/bank calls are involved. Cron invocation and long-running recurrence recovery require ongoing observation; save/compute/pause have HTTP tests.
 
 ## Deferred / explicit limits
 
 User explicitly deferred SMS, Kakao/Alimtalk, bank automated lookup and cash receipt providers. No paid contract, charge, external send, actual payment capture or tax-receipt issue is executed. Provider writes return 503 `provider_not_configured`. Manual deposit confirmation and internal prepaid credit are available. External geocoding/road-time routing remains unconnected; coordinate-based nearest-neighbor ordering is internal, not a traffic-aware route guarantee.
 
-Original master password changes remain in Cloudflare's existing secret configuration; employee password change/revocation is in the app. Master credentials were not replaced. Original customer page/server equivalence and every original proprietary/provider behavior are not verified. This release must not be represented as complete private-server equivalence.
+New-app owner password rotation uses separately hashed/versioned D1 credentials and invalidates prior new-app sessions. Staff password reset/disable revokes server sessions. Existing Cloudflare master secrets and original-app credentials are unchanged. Original customer screen/private-server equivalence and every proprietary/provider behavior are not verified. This release must not be represented as complete private-server equivalence.
 
 Lists are bounded: up to 5,000 order/customer rows for a query, 2,000 generic record rows, 100 catalog types/order and 100 selected bulk orders. Use date/search filters. 100/300-customer synthetic bursts are evidence only for their measured workload, not proof of 50 businesses with tens of thousands of simultaneous customers. Further capacity qualification needs agreed peak targets, storage/usage budgets, monitoring and possibly per-shop database sharding/queue design. No unlimited capacity or SLA is promised.
 

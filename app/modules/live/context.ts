@@ -3,6 +3,7 @@ import { getD1 } from "../../lib/data";
 import { sha256Hex } from "../../lib/security";
 import { LiveError } from "./domain";
 import { parse, type LiveContext } from "./store";
+import {ownerSession} from './owner-auth';
 const initializedShops = new Set<string>();
 export async function context(request: Request): Promise<LiveContext> {
   const db = getD1();
@@ -35,8 +36,10 @@ export async function context(request: Request): Promise<LiveContext> {
       };
     throw new LiveError("직원 세션이 만료되었습니다.", 401);
   }
+  const owner=await ownerSession(request,db);if(owner)return owner;
   const admin = await getAdminUser();
   if (admin) {
+    if(await db.prepare('SELECT email FROM of_owner_credentials WHERE email=?').bind(admin.email).first())throw new LiveError('새 운영 비밀번호로 다시 로그인해 주세요.',401);
     const shop = (await sha256Hex(`orderflow-live-shop:${admin.email}`)).slice(
       0,
       32,
@@ -73,7 +76,7 @@ export function authorize(c: LiveContext, path: string, method: string) {
     return;
   if (path === "/workspace" || path === "/workspace/form")
     throw new LiveError("사장님 전용 업무 설정입니다.", 403);
-  const permission = /ledger|prepayment|\/point\/|prepay-deduct/u.test(path)
+  const permission = /ledger|prepayment|\/point\/|prepay-deduct|\/customers\/access-link/u.test(path)
     ? "PREPAY_POINT"
     : path.startsWith("/orders") || path.startsWith("/delivery-route")
       ? "ORDER_OPS"

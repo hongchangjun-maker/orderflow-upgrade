@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { pbkdf2Sync, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import {verifyReplicaAssets} from './verify-replica-assets.mjs';
 const cli = new URL(
   "../node_modules/wrangler/bin/wrangler.js",
   import.meta.url,
@@ -27,7 +28,8 @@ await run([
 const password = randomBytes(30).toString("base64url"),
   salt = randomBytes(16);
 const hash = `pbkdf2_sha256$100000$${salt.toString("base64url")}$${pbkdf2Sync(password, salt, 100000, 32, "sha256").toString("base64url")}`;
-const emails = ["qa-owner@orderflow.invalid", "qa-second@orderflow.invalid"];
+const runTag=Date.now();
+const emails = [`qa-owner-${runTag}@orderflow.invalid`, `qa-second-${runTag}@orderflow.invalid`];
 await run(
   ["secret", "bulk", ...config],
   JSON.stringify({
@@ -38,6 +40,7 @@ await run(
 );
 await run(["deploy", "--keep-vars", ...config]);
 const base = "https://orderflow-korea-upgrade-staging.hhongcjun.workers.dev";
+await verifyReplicaAssets(base);
 async function login(email) {
   const response = await fetch(base + "/api/replica/login", {
     method: "POST",
@@ -80,4 +83,7 @@ if ((await call("/session", "")).status !== 401)
 console.log("PASS staging tenant isolation and real authentication");
 process.env.LIVE_TEST_URL = base;
 process.env.LIVE_TEST_COOKIE = cookie;
+process.env.LIVE_LOAD??='300';
 await import("../tests/live-http.mjs");
+const {runParity}=await import("../tests/parity-http.mjs");
+await runParity(base,cookie,{email:emails[0],password});

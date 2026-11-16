@@ -2,4 +2,6 @@
 # Preserve their SHA on Windows; review changes through generator/provenance/tests.
 public/replica-assets/application.js -text -diff
 public/replica-assets/runtime.mjs text eol=lf
+public/replica-assets/order-dto.mjs text eol=lf
+public/replica-assets/isolation.css text eol=lf
 public/replica-assets/reference.css -text -diff

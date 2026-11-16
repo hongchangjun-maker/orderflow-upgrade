@@ -1,5 +1,9 @@
-import { integer, itemOf, LiveError, rows, text, type Doc } from "./domain";
+import { integer, itemOf, LiveError, obj, rows, text, type Doc } from "./domain";
 import { cleanHtml } from "./html";
+import { validateFeeRule } from "./fee-service";
+import { deliveryFee,regionMatch } from "./pricing";
+import { catalogActive, catalogHub, catalogImportRange } from "./catalog-rules";
+const feeView=(r:Doc)=>({feeName:'',feeGbn:'FORCE',deliveryTip:0,minAmt:0,minAmtMessage:'',useGbn:'Y',...r,feeNo:r.id??r.feeNo,amtArr:Array.isArray(r.amtArr)?r.amtArr:[null,null,null],tipArr:Array.isArray(r.tipArr)?r.tipArr:[null,null,null],regionRows:rows(r.regionRows).map((v,index)=>({...v,sortNo:v.sortNo??index+1}))});
 import {
   audit,
   first,
@@ -8,6 +12,7 @@ import {
   parse,
   put,
   query,
+  remove,
   setting,
   transaction,
   type LiveContext,
@@ -31,13 +36,14 @@ export async function formDetail(
   const data = parse(form.data);
   const items = await query(
     c,
-    "SELECT * FROM of_items WHERE shop=? AND form_id=? AND active=1 ORDER BY id",
+    "SELECT * FROM of_items WHERE shop=? AND form_id=? AND active=1 ORDER BY COALESCE(CAST(json_extract(data,'$.sort_index') AS INTEGER),id),id",
     c.shop,
     id,
   );
   return {
     setting: {
       ...data,
+      use_gbn: form.active ? "Y" : "N",
       uocode: id,
       token: form.token,
       url: `${c.origin}/buy/${form.token}`,
@@ -53,7 +59,12 @@ export async function formDetail(
     })),
     payMethods: rows(data.payMethods).length
       ? rows(data.payMethods)
-      : [{ seqno: 1, pay_name: "계좌이체", use_gbn: "Y", sort_gbn: 1 }],
+      : [
+          { seqno: 1, pay_name: "계좌이체", use_gbn: "Y", sort_gbn: 1 },
+          { seqno: 2, pay_name: "매장결제", use_gbn: "Y", sort_gbn: 2 },
+          { seqno: 3, pay_name: "선결제", use_gbn: "N", sort_gbn: 3 },
+          { seqno: 4, pay_name: "체크·신용카드", use_gbn: "N", sort_gbn: 4 },
+        ],
     deliveryMethods: rows(data.deliveryMethods).length
       ? rows(data.deliveryMethods)
       : [
@@ -70,7 +81,7 @@ export async function formDetail(
 export async function formList(c: LiveContext) {
   const forms = await query(
     c,
-    "SELECT f.*,COUNT(DISTINCT o.id) order_count,COALESCE(SUM(o.amount+o.fee),0) sales FROM of_forms f LEFT JOIN of_orders o ON o.form_id=f.id AND o.status<>'40' WHERE f.shop=? GROUP BY f.id ORDER BY f.id DESC LIMIT 2000",
+    "SELECT f.*,COUNT(DISTINCT COALESCE(o.merged_into,o.id)) order_count,COALESCE(SUM(o.amount+o.fee-COALESCE(json_extract(o.data,'$.point_used'),0)+COALESCE(json_extract(o.data,'$.adjustment'),0)),0) sales FROM of_forms f LEFT JOIN of_orders o ON o.form_id=f.id AND o.status<>'40' WHERE f.shop=? GROUP BY f.id ORDER BY f.id DESC LIMIT 2000",
     c.shop,
   );
   return forms.map((f) => ({
@@ -113,13 +124,14 @@ export async function saveForm(c: LiveContext, data: Doc, id = 0) {
     statements.push(
       c.db
         .prepare(
-          "INSERT INTO of_forms(id,shop,token,data,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+          "INSERT INTO of_forms(id,shop,token,data,active,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
         )
         .bind(
           key,
           c.shop,
           crypto.randomUUID().replaceAll("-", ""),
           JSON.stringify(clean),
+          catalogActive(data.use_gbn),
           time,
           time,
         ),
@@ -145,7 +157,7 @@ export async function saveForm(c: LiveContext, data: Doc, id = 0) {
         .bind(
           JSON.stringify(clean),
           time,
-          data.use_gbn === "N" ? 0 : 1,
+          catalogActive(data.use_gbn),
           c.shop,
           key,
         ),
@@ -156,8 +168,9 @@ export async function saveForm(c: LiveContext, data: Doc, id = 0) {
       .prepare("UPDATE of_items SET active=0 WHERE shop=? AND form_id=?")
       .bind(c.shop, key),
   );
-  for (const raw of items) {
+  for (const [position, raw] of items.entries()) {
     const item = itemOf(raw);
+    item.sort_index = position;
     if (item.detail_html != null)
       item.detail_html = cleanHtml(item.detail_html);
     const existing = Number(raw.seqno ?? 0);
@@ -215,15 +228,7 @@ export async function formsApi(
     return all.slice(page * size, (page + 1) * size);
   }
   if (path === "/urlorder-v2/hub") {
-    const forms = await formList(c);
-    return {
-      rows: forms.map((f) => ({
-        ...f,
-        section: f.use_gbn === "Y" ? "LIVE" : "RECENT",
-        status: f.use_gbn === "Y" ? "LIVE" : "OFF",
-      })),
-      totalCnt: forms.length,
-    };
+    return catalogHub(await formList(c), data);
   }
   if (/^\/urlorders\/setting(?:\/\d+)?$/u.test(path)) {
     const id = Number(path.split("/")[3] ?? 0);
@@ -248,12 +253,15 @@ export async function formsApi(
   if (path.startsWith("/urlorders/setting/")) {
     const suffix = path.split("/").at(-1);
     let id = Number(data.uocode ?? data.formId ?? 0);
-    if (suffix === "item-import")
+    if (suffix === "item-import") {
+      const range = catalogImportRange(data.from_date, data.to_date);
       return (
         await query(
           c,
-          "SELECT * FROM of_items WHERE shop=? AND active=1 ORDER BY id DESC LIMIT 2000",
+          "SELECT i.* FROM of_items i JOIN of_forms f ON f.id=i.form_id AND f.shop=i.shop WHERE i.shop=? AND i.active=1 AND REPLACE(COALESCE(NULLIF(json_extract(f.data,'$.order_date'),''),strftime('%Y%m%d',f.created_at,'+9 hours')),'-','') BETWEEN ? AND ? ORDER BY f.id DESC,COALESCE(CAST(json_extract(i.data,'$.sort_index') AS INTEGER),i.id),i.id LIMIT 2000",
           c.shop,
+          range.from,
+          range.to,
         )
       ).map((r) => ({
         ...parse(r.data),
@@ -261,6 +269,7 @@ export async function formsApi(
         stock: r.stock,
         cost: r.price,
       }));
+    }
     if (suffix === "item-images") {
       const items = (
         await formDetail(c, integer(id, 1, Number.MAX_SAFE_INTEGER))
@@ -323,8 +332,14 @@ export async function formsApi(
         ...parse(row.data),
         images: parse(row.data).images ?? [],
         seqno: seq,
+        uocode: row.form_id,
+        cost: row.price,
+        stock: row.stock,
+        update_date: String(row.revision),
       };
     const item = itemOf({ ...parse(row.data), ...data });
+    if (item.sort_index != null)
+      item.sort_index = integer(item.sort_index, 0, 999999);
     if (item.detail_html != null)
       item.detail_html = cleanHtml(item.detail_html);
     // Retain the database stock, not a stale stock value inside JSON.
@@ -358,8 +373,24 @@ export async function formsApi(
         data.update_date ?? row.revision,
       )
       .run();
-    if (!result.meta.changes)
-      throw new LiveError("품목이 변경됐습니다. 새로고침해 주세요.", 409);
+    if (!result.meta.changes) {
+      const current = await first(
+        c,
+        "SELECT revision,stock,price FROM of_items WHERE id=? AND shop=?",
+        seq,
+        c.shop,
+      );
+      throw new LiveError(
+        "품목이 변경됐습니다. 현재 재고와 가격을 확인해 주세요.",
+        409,
+        "revision_conflict",
+        {
+          update_date: String(current?.revision ?? row.revision),
+          stock: current?.stock ?? row.stock,
+          cost: current?.price ?? row.price,
+        },
+      );
+    }
     await audit(c, "item", seq);
     return {
       ...item,
@@ -373,9 +404,32 @@ export async function formsApi(
     if (method === "GET") return list(c, "badge");
     return put(c, "badge", data, Number(data.seqno ?? 0));
   }
+  if(path==='/delivery-fee/fees/preview-address'){
+    const rule={...data,feeGbn:'REGION'},match=regionMatch(rule,text(data.address));
+    const deny=match?.deny===true||!match&&data.otherDeny===true;
+    return {matched:match?{sortNo:match.sortNo,matchedKeyword:match.keyword}:null,deny,amt:deny?0:deliveryFee({},0,'direct',text(data.address),rule),sellerAmt:deny?Number(match?.amt??data.deliveryTip??0):null};
+  }
+  if(/^\/delivery-fee\/fees\/\d+\/disable$/u.test(path)){
+    const id=Number(path.split('/')[3]),old=(await list(c,'delivery-fee')).find(f=>Number(f.id)===id);
+    if(!old)throw new LiveError('배송비 설정을 찾을 수 없습니다.',404);
+    return put(c,'delivery-fee',{...old,useGbn:'N'},id);
+  }
+  if(/^\/delivery-fee\/fees\/\d+$/u.test(path)&&method==='DELETE')return remove(c,'delivery-fee',Number(path.split('/')[3]));
   if (path === "/delivery-fee/fees" || path === "/delivery-fee/shop-city") {
-    if (method === "GET") return list(c, "delivery-fee");
-    return put(c, "delivery-fee", data, Number(data.seqno ?? 0));
+    if (method === "GET") {
+      const settings=parse((await first(c,'SELECT settings FROM of_shops WHERE id=?',c.shop))?.settings);
+      return (await list(c,"delivery-fee")).map((r,index)=>({...feeView(r),sortNo:r.sortNo??index,builtin:false,linkUrlorderCnt:Object.entries(settings).filter(([key,value])=>key.startsWith('/delivery-fee/urlorder/')&&[obj(value).feeNoDeliver,obj(value).feeNoPickup,obj(value).feeNoParcel,...rows(obj(value).rows).map(v=>v.feeNo)].some(n=>Number(n)===Number(r.id))).length,linkRowCnt:Object.entries(settings).filter(([key,value])=>key.startsWith('/delivery-fee/deliverygbn/')&&Number(obj(value).feeNo)===Number(r.id)).length}));
+    }
+    const id=Number(data.feeNo??data.seqno??0);
+    const result=await put(c,"delivery-fee",validateFeeRule(feeView({...data,feeNo:id||undefined})),id);
+    return {...result,feeNo:result.id??result.seqno};
+  }
+  if(/^\/delivery-fee\/urlorder\/\d+\/link$/u.test(path)){
+    const id=Number(path.split('/')[3]),detail=await formDetail(c,id);
+    const value=await setting(c,path,method==='GET'?undefined:data);
+    const all=parse((await first(c,'SELECT settings FROM of_shops WHERE id=?',c.shop))?.settings);
+    const linked=detail.deliveryMethods.map(m=>{const override=all[`/delivery-fee/deliverygbn/${m.seqno}/link`] as Doc|undefined;return {seqno:m.seqno,feeNo:override&&(!override.uocode||Number(override.uocode)===id)?override.feeNo??null:rows(value.rows).find(r=>Number(r.seqno)===Number(m.seqno))?.feeNo??null};});
+    return {uocode:id,feeNoDeliver:null,feeNoPickup:null,feeNoParcel:null,sameDayMerge:false,mergeNotice:'',...value,rows:linked.filter(r=>r.feeNo!=null)};
   }
   if (path.startsWith("/delivery-fee/"))
     return setting(c, path, method === "GET" ? undefined : data);

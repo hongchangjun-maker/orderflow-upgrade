@@ -7,6 +7,8 @@ import {
 } from "../../lib/auth";
 import { getD1 } from "../../lib/data";
 import { scopedFingerprint, sha256Hex } from "../../lib/security";
+import {passwordHash,verifyPassword as verify,clearCookie} from './credentials';
+import {changeOwnerPassword,loginStoredOwner} from './owner-auth';
 import { integer, LiveError, required, text, type Doc } from "./domain";
 import {
   audit,
@@ -17,37 +19,6 @@ import {
   setting,
   type LiveContext,
 } from "./store";
-const hex = (bytes: ArrayBuffer) =>
-  Array.from(new Uint8Array(bytes), (b) =>
-    b.toString(16).padStart(2, "0"),
-  ).join("");
-export async function passwordHash(
-  password: string,
-  salt = crypto.randomUUID(),
-) {
-  if (password.length < 10 || password.length > 128)
-    throw new LiveError("비밀번호는 10~128자로 설정해 주세요.", 422);
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    { name: "PBKDF2" },
-    false,
-    ["deriveBits"],
-  );
-  return `${salt}:${hex(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: new TextEncoder().encode(salt), iterations: 100000 }, key, 256))}`;
-}
-async function verify(password: string, stored: string) {
-  try {
-    const actual = await passwordHash(password, stored.split(":")[0]);
-    if (actual.length !== stored.length) return false;
-    let delta = 0;
-    for (let i = 0; i < actual.length; i++)
-      delta |= actual.charCodeAt(i) ^ stored.charCodeAt(i);
-    return delta === 0;
-  } catch {
-    return false;
-  }
-}
 export async function liveLogin(request: Request, data: Doc) {
   const db = getD1();
   const login = required(
@@ -79,7 +50,10 @@ export async function liveLogin(request: Request, data: Doc) {
     "Cache-Control": "no-store",
   });
   let valid = false;
+  const storedOwner=!staff?await loginStoredOwner(db,login,password,headers):'missing';
+  if(storedOwner==='valid'){headers.append('Set-Cookie',clearedSessionCookie());headers.append('Set-Cookie',clearCookie('orderflow_staff'));valid=true;}
   if (staff && (await verify(password, String(staff.password_hash)))) {
+    headers.append('Set-Cookie',clearCookie('orderflow_owner'));
     const token = crypto.randomUUID() + crypto.randomUUID();
     await db
       .prepare(
@@ -98,10 +72,11 @@ export async function liveLogin(request: Request, data: Doc) {
     );
     valid = true;
   } else if (
-    !staff &&
+    !staff && storedOwner==='missing' &&
     allowedAdminEmails().includes(login) &&
     (await verifyAdminPassword(password))
   ) {
+    headers.append('Set-Cookie',clearCookie('orderflow_owner'));
     headers.append(
       "Set-Cookie",
       sessionCookie(await createAdminSession(login)),
@@ -147,6 +122,7 @@ export async function accountsApi(
   if (path === "/session") {
     const shop = await first(c, "SELECT name FROM of_shops WHERE id=?", c.shop);
     return {
+      changeCursor:Number((await first(c,'SELECT COALESCE(MAX(id),0) id FROM of_changes WHERE shop=?',c.shop))?.id??0),
       seller: {
         mcode: c.shop,
         ucode: c.actor,
@@ -242,6 +218,7 @@ export async function accountsApi(
       );
     const login = required(data.login, "직원 아이디", 160).toLowerCase(),
       name = required(data.name, "직원 이름", 80);
+    if(allowedAdminEmails().includes(login)||await first(c,'SELECT email FROM of_owner_credentials WHERE email=?',login))throw new LiveError('사장님 아이디를 직원 아이디로 사용할 수 없습니다.',409);
     const hash = await passwordHash(required(data.password, "비밀번호", 128));
     const r = await c.db
       .prepare(
@@ -258,6 +235,15 @@ export async function accountsApi(
     await audit(c, "staff:create", r.meta.last_row_id);
     return { id: r.meta.last_row_id };
   }
+  if(/^\/staff\/\d+\/(reset-password|disable)$/u.test(path)){
+    if(c.role!=='OWNER')throw new LiveError('사장님만 직원을 관리할 수 있습니다.',403);
+    const id=integer(path.split('/')[2],1);
+    const staff=await first(c,"SELECT id FROM of_staff WHERE shop=? AND id=? AND role='STAFF'",c.shop,id);
+    if(!staff)throw new LiveError('직원을 찾을 수 없습니다.',404);
+    const statement=path.endsWith('/disable')?c.db.prepare('UPDATE of_staff SET active=0 WHERE id=? AND shop=?').bind(id,c.shop):c.db.prepare('UPDATE of_staff SET password_hash=? WHERE id=? AND shop=?').bind(await passwordHash(required(data.newPassword,'새 비밀번호',128)),id,c.shop);
+    await c.db.batch([statement,c.db.prepare('DELETE FROM of_sessions WHERE staff_id=?').bind(id)]);
+    await audit(c,'staff:credentials-revoke',id);return {updated:1};
+  }
   if (path === "/auth/change-password") {
     const staff = await first(
       c,
@@ -265,14 +251,10 @@ export async function accountsApi(
       c.shop,
       c.actor,
     );
-    if (!staff)
-      throw new LiveError(
-        "마스터 인증은 Cloudflare 보안 설정에서 변경합니다. 직원 비밀번호는 이 화면에서 변경할 수 있습니다.",
-        409,
-      );
+    if (!staff)return changeOwnerPassword(c,data);
     if (
       !(await verify(
-        text(data.oldPassword ?? data.old_password),
+        text(data.currentPassword??data.oldPassword ?? data.old_password),
         String(staff.password_hash),
       ))
     )

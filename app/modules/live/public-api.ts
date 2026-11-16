@@ -9,6 +9,11 @@ import {
 import { LiveError, obj, publicNotice, text, type Doc } from "./domain";
 import { formDetail } from "./forms";
 import { createLiveOrder } from "./orders";
+import { customerProfile,verifiedCustomer } from "./customer-access";
+import { quoteOrder } from "./order-quote";
+import { amountDue,paymentOptions } from "./pricing";
+import { cleanHtml } from "./html";
+import { upload } from "./media";
 import { failure, readInput, success } from "./router";
 import { now, parse, transaction, type LiveContext } from "./store";
 export async function publicApi(request: Request) {
@@ -21,9 +26,11 @@ export async function publicApi(request: Request) {
       if (origin && origin !== url.origin)
         throw new LiveError("허용되지 않은 요청입니다.", 403);
     }
-    const data = obj(request.method === "GET" ? {} : await readInput(request));
+    const isUpload=parts[0]==='chat'&&parts[2]==='upload'&&request.method==='POST'&&request.headers.get('content-type')?.includes('multipart/form-data');
+    const data = obj(request.method === "GET"||isUpload ? {} : await readInput(request));
     if (!["GET", "POST"].includes(request.method))
       throw new LiveError("허용되지 않은 요청 방식입니다.", 405);
+    if(parts[0]==='customer')return await customerProfile(db,request,parts[1],request.method==='POST'?data:undefined);
     if (parts[0] === "form") {
       const token = parts[1];
       if (!/^[a-f\d]{32}$/u.test(token))
@@ -43,6 +50,8 @@ export async function publicApi(request: Request) {
         permissions: {},
         origin: url.origin,
       };
+      const customer=await verifiedCustomer(db,request,c.shop);
+      if(customer)c.actor=`customer:${customer.mobile}`;
       if (request.method === "GET") {
         const detail = await formDetail(c, Number(form.id));
         const shop = obj(parse(form.settings).shop);
@@ -61,6 +70,14 @@ export async function publicApi(request: Request) {
             detail.setting.shipping_fee ?? detail.setting.delivery_amt ?? 0,
           ),
           minOrderAmount: Number(detail.setting.min_order_amount ?? 0),
+          paymentOptions:paymentOptions(detail.setting,detail.payMethods),
+          options:{
+            usePickupTime:detail.setting.use_pickup_time==='Y',
+            pickupTimes:Array.isArray(detail.setting.pickupTimes)?detail.setting.pickupTimes:text(detail.setting.pickup_time_arr).split(',').map(v=>v.trim()).filter(Boolean),
+            cashReceipt:detail.setting.cash_receipt_gbn!=='N',
+            present:detail.setting.use_present==='Y',
+            pointEnabled:detail.setting.use_customer_use_point==='Y'
+          },
           deliveryOptions: [
             ...(detail.setting.delivery_deliver !== "N" ? ["direct"] : []),
             ...(detail.setting.delivery_pickup === "Y" ? ["pickup"] : []),
@@ -76,9 +93,15 @@ export async function publicApi(request: Request) {
               stock: i.stock,
               image: Array.isArray(i.imageUrls) ? i.imageUrls[0] : "",
               description: text(i.detail_html).replace(/<[^>]*>/gu, ""),
+              imageUrls:Array.isArray(i.imageUrls)?i.imageUrls:[],
+              detailHtml:cleanHtml(i.detail_html),
+              minQty:Number(i.item_min_qty??0),maxQty:Number(i.item_max_qty??0),
+              stockVisible:i.stock_visible_gbn==='Y'&&Number(i.stock)<=Number(i.stock_visible_qty??0),stockVisibleQty:Number(i.stock_visible_qty??0),
+              facts:Object.entries({origin_country:'원산지',livestock_trace_no:'축산물이력번호',content_amount:'내용량',expiry_info:'소비기한',storage_method:'보관방법',allergens:'알레르기',manufacturer:'제조사'}).filter(([key])=>text(i[key]??obj(i.fields)[key])).map(([key,label])=>({label,value:text(i[key]??obj(i.fields)[key])})),
             })),
         });
       }
+      if(parts[2]==='quote')return success(await quoteOrder(c,Number(form.id),data));
       if (data.consent !== true)
         throw new LiveError(
           "주문 이행을 위한 개인정보 수집에 동의해 주세요.",
@@ -139,7 +162,7 @@ export async function publicApi(request: Request) {
         orderNo: order.id,
         status: order.status,
         ispaid: order.ispaid,
-        total: Number(order.amount) + Number(order.fee),
+        total: amountDue({...order,data:parse(order.data)}),
         shopName: order.shop_name,
         createdAt: order.created_at,
         items: items.results,
@@ -151,9 +174,16 @@ export async function publicApi(request: Request) {
         id,
         data: room,
       } = await publicChatContext(db, parts[1], url.origin);
+      if(isUpload){
+        const fingerprint=await scopedFingerprint(request,`chat-upload:${id}`);
+        const gate=await db.prepare('INSERT INTO of_submissions(fingerprint,created_at) SELECT ?,? WHERE (SELECT COUNT(*) FROM of_submissions WHERE fingerprint=? AND created_at>?)<10').bind(fingerprint,now(),fingerprint,new Date(Date.now()-60000).toISOString()).run();
+        if(!gate.meta.changes)throw new LiveError('첨부 요청이 많습니다. 잠시 후 다시 시도해 주세요.',429);
+        if(room.status==='C')throw new LiveError('종료된 채팅방입니다.',409);
+        return success(await upload(c,request));
+      }
       if (request.method === "POST")
         return success(
-          await send(c, id, { type: "text", content: data.content }, "C"),
+          await send(c, id, data, "C"),
         );
       return success({
         room: {
@@ -176,13 +206,14 @@ export async function publicApi(request: Request) {
         )
         .bind(parts[1])
         .first<Doc>();
-      const plan = parse(record?.data);
+      const plan:Doc = {...parse(record?.data),planNo:parse(record?.data).planNo??record?.id};
       if (!record || text(plan.expiresAt) < now())
         throw new LiveError("배송 링크가 만료됐습니다.", 410);
       if (request.method === "POST") {
         const stops = Array.isArray(plan.stops) ? plan.stops.map(obj) : [];
         const index = stops.findIndex((s) => s.stopCode === data.stopCode);
         if (index < 0) throw new LiveError("배송지를 찾을 수 없습니다.", 404);
+        const completedKeys=Array.isArray(stops[index].ocodekeys)?stops[index].ocodekeys:[stops[index].stopCode];
         if (stops[index].stopStatus === "30") return success(plan);
         stops[index] = { ...stops[index], stopStatus: "30", finishedAt: now() };
         const next = {
@@ -209,14 +240,14 @@ export async function publicApi(request: Request) {
               .bind(JSON.stringify(next), now(), record.id, record.shop),
             db
               .prepare(
-                "UPDATE of_orders SET status='30',revision=revision+1,updated_at=? WHERE shop=? AND status<>'40' AND (key=? OR merged_into=(SELECT id FROM of_orders WHERE shop=? AND key=?))",
+                "UPDATE of_orders SET status='30',revision=revision+1,updated_at=? WHERE shop=? AND status<>'40' AND (key IN (SELECT value FROM json_each(?)) OR merged_into IN (SELECT id FROM of_orders WHERE shop=? AND key IN (SELECT value FROM json_each(?))))",
               )
               .bind(
                 now(),
                 record.shop,
-                data.stopCode,
+                JSON.stringify(completedKeys),
                 record.shop,
-                data.stopCode,
+                JSON.stringify(completedKeys),
               ),
           ],
           [

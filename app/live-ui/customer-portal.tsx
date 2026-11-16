@@ -1,0 +1,9 @@
+"use client";
+import {useEffect,useState} from 'react';
+import {liveRequest} from '../modules/live-client/client';
+type Profile={authenticated:boolean;mobileMasked:string;customerName?:string;pointBalance?:number;prepayBalance?:number;orders?:{id:number;key:string;order_date:string;status:string;ispaid:string;total:number}[];forms?:{token:string;title:string;url:string}[]};
+export default function CustomerPortal({token}:{token:string}){
+  const [profile,setProfile]=useState<Profile|null>(null),[error,setError]=useState('');
+  useEffect(()=>{let alive=true;liveRequest<Profile>('/api/live-public/customer/'+token).then(v=>{if(alive)setProfile(v);}).catch(e=>{if(alive)setError(e.message);});return()=>{alive=false;};},[token]);
+  return <main className="customer-order" style={{maxWidth:760,margin:'auto',padding:24}}><h1>나의 주문 · 잔액</h1>{error&&<p role="alert">{error}</p>}{!profile?<p role="status">확인 중입니다.</p>:!profile.authenticated?<form onSubmit={async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{setProfile(await liveRequest<Profile>('/api/live-public/customer/'+token,{pin:f.get('pin')}));setError('');}catch(e){setError(e instanceof Error?e.message:'확인하지 못했습니다.');}}}><p>{profile.mobileMasked} 고객전용 링크입니다.</p><label>매장에서 안내한 확인번호 (기본: 전화번호 뒤 4자리)<input name="pin" type="password" inputMode="numeric" minLength={4} maxLength={8} required autoComplete="off"/></label><button>고객 확인</button></form>:<><h2>{profile.customerName}님</h2><p>포인트 {profile.pointBalance?.toLocaleString()}P · 선결제 잔액 {profile.prepayBalance?.toLocaleString()}원</p><h2>주문하기</h2>{profile.forms?.map(f=><p key={f.token}><a href={f.url}>{f.title||'주문서 열기'}</a></p>)}<h2>최근 주문 (최대 100건)</h2>{profile.orders?.map(o=><p key={o.id}><a href={'/receipt/'+o.key}>{o.order_date} · 주문 {o.id} · {o.total.toLocaleString()}원 · {o.status==='40'?'취소':o.status==='30'?'완료':'접수/진행 중'}</a></p>)}</>}</main>;
+}

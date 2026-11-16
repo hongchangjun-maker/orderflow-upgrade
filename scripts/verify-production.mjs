@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
+import {verifyReplicaAssets} from './verify-replica-assets.mjs';
 const base='https://orderflow-korea-upgrade.hhongcjun.workers.dev';
 const checks=[];
+await verifyReplicaAssets(base);
 const check=(name)=>{checks.push(name);console.log(`PASS ${name}`);};
 const health=await fetch(base+'/api/health');assert.equal(health.status,200);const status=await health.json();assert.equal(status.database,'connected');assert.equal(status.environment,'production');assert.equal(status.authConfigured,true);check('production D1 connected and existing auth configured');
 for(const path of ['/api/replica/session','/api/admin/orders']){assert.equal((await fetch(base+path)).status,401);}

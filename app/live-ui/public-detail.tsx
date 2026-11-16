@@ -1,6 +1,6 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
-import { liveRequest } from "../modules/live-client/client";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { liveRequest,liveUpload } from "../modules/live-client/client";
 type Detail = {
   orderNo?: number;
   status?: string;
@@ -13,6 +13,7 @@ type Detail = {
     sender: string;
     content: string;
     createdAt: string;
+    type?:string;fileUrl?:string;fileName?:string;readAt?:string;
   }[];
   room?: { status: string; shopName: string };
   stops?: {
@@ -20,32 +21,42 @@ type Detail = {
     address: string;
     customerName: string;
     stopStatus: string;
+    addr?:string;label?:string;orderCount?:number;
   }[];
 };
 export function PublicDetail({ kind, token }: { kind: string; token: string }) {
   const [data, setData] = useState<Detail | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
-  const load = useCallback(async () => {
+  const reading=useRef(false);
+  const load = useCallback(async (signal?:AbortSignal) => {
+    if(reading.current)return;
+    reading.current=true;
     try {
-      setData(await liveRequest<Detail>(`/api/live-public/${kind}/${token}`));
+      const next=await liveRequest<Detail>(`/api/live-public/${kind}/${token}`,undefined,{signal});
+      if(!signal?.aborted)setData(next);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "불러오지 못했습니다.");
+      if(!signal?.aborted)setError(e instanceof Error ? e.message : "불러오지 못했습니다.");
+    }finally{
+      reading.current=false;
     }
   }, [kind, token]);
   useEffect(() => {
+    const controller=new AbortController();
     const start = setTimeout(() => {
-      void load();
+      void load(controller.signal);
     }, 0);
     const timer = setInterval(() => {
-      void load();
-    }, 10000);
+      if(!document.hidden)void load(controller.signal);
+    }, kind==='chat'?3000:15000);
     return () => {
       clearTimeout(start);
       clearInterval(timer);
+      controller.abort();
     };
-  }, [load]);
+  }, [load,kind]);
   const send = async (body: Record<string, unknown>) => {
+    if(busy)return false;
     setBusy(true);
     setError("");
     try {
@@ -55,8 +66,10 @@ export function PublicDetail({ kind, token }: { kind: string; token: string }) {
       );
       if (result.url) window.location.assign(result.url);
       else await load();
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "처리 실패");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -118,17 +131,18 @@ export function PublicDetail({ kind, token }: { kind: string; token: string }) {
               <article key={m.msgId}>
                 <b>{m.sender === "C" ? "나" : "매장"}</b>
                 <p>{m.content}</p>
+                {m.fileUrl&&<p><a href={m.fileUrl} target="_blank" rel="noreferrer">{m.type==='image'?'사진 열기':m.fileName||'첨부파일 다운로드'}</a></p>}
+                {m.sender==='C'&&<small>{m.readAt?'읽음':'미확인'} · </small>}
                 <small>{m.createdAt}</small>
               </article>
             ))}
           </section>
           <form
-            onSubmit={(e) => {
+            onSubmit={async(e) => {
               e.preventDefault();
               const f = e.currentTarget;
               const content = new FormData(f).get("message");
-              void send({ content });
-              f.reset();
+              if(await send({ content }))f.reset();
             }}
           >
             <label>
@@ -137,13 +151,26 @@ export function PublicDetail({ kind, token }: { kind: string; token: string }) {
             </label>
             <button disabled={busy || data.room?.status === "C"}>보내기</button>
           </form>
+          <label>사진·파일 첨부 (최대 10MB)
+            <input type="file" accept=".jpg,.jpeg,.png,.webp,.pdf,.txt,.csv" disabled={busy||data.room?.status==='C'} onChange={async event=>{
+              const input=event.currentTarget,file=input.files?.[0];if(!file)return;
+              setBusy(true);setError('');
+              try{
+                if(file.size>10_000_000)throw new Error('파일은 10MB 이하로 선택해 주세요.');
+                const result=await liveUpload<Record<string,unknown>>(`/api/live-public/chat/${token}/upload`,file);
+                await liveRequest(`/api/live-public/chat/${token}`,{type:result.kind==='image'?'image':'file',content:result.fileName,...result});
+                await load();input.value='';
+              }catch(error){setError(error instanceof Error?error.message:'첨부 실패');}finally{setBusy(false);}
+            }}/>
+          </label>
         </>
       ) : (
         <section>
           {data.stops?.map((s) => (
             <article key={s.stopCode}>
-              <h2>{s.customerName}</h2>
-              <p>{s.address}</p>
+              <h2>{s.label??s.customerName}</h2>
+              <p>{s.addr??s.address}</p>
+              {s.orderCount&&<p>주문 {s.orderCount}건</p>}
               <button
                 disabled={busy || s.stopStatus === "30"}
                 onClick={() => send({ stopCode: s.stopCode })}

@@ -1,8 +1,10 @@
 import { clearedSessionCookie } from "../../lib/auth";
 import { getD1 } from "../../lib/data";
 import { sha256Hex } from "../../lib/security";
+import {cookieValue,clearCookie} from './credentials';
 import { context, authorize } from "./context";
 import { accountsApi, liveLogin } from "./accounts";
+import { customerAccessApi } from "./customer-access";
 import { communicationsApi } from "./communications";
 import { customerRows, customersApi } from "./customers";
 import { dashboardApi } from "./dashboard";
@@ -20,12 +22,12 @@ export const success = (data: unknown) =>
 export function failure(error: unknown) {
   if (error instanceof LiveError)
     return Response.json(
-      { success: false, error: { code: error.code, message: error.message } },
+      { success: false, error: { code: error.code, message: error.message },...(error.details!==undefined?{data:error.details}:{}) },
       { status: error.status, headers: { "Cache-Control": "no-store" } },
     );
   const message = String(error);
   if (
-    /stock|insufficient_balance|completed_order_is_final|cancelled_order_is_final|prepay_payment_is_final|UNIQUE/u.test(
+    /stock|insufficient_balance|completed_order_is_final|cancelled_order_is_final|prepay_payment_is_final|point_earned_payment_is_final|invalid_point_amount|UNIQUE/u.test(
       message,
     )
   )
@@ -104,6 +106,8 @@ export async function liveApi(request: Request) {
         "/inquiry/unread-count",
         "/inquiry/list",
         "/inquiry/messages",
+        "/inquiry/admin/list",
+        "/inquiry/admin/messages",
       ].includes(path) &&
       !/^(?:\/session|\/workspace|\/events|\/account\/perms(?:\/mine)?|\/staff|\/shop-setting(?:\/logo(?:\/draft|\/preview-info)?)?|\/urlorders\/setting\/\d+|\/urlorders\/list|\/orders\/(?:url-orders|delivery-methods|pay-methods|compute-delivery-amt|share-link)|\/dashboard\/[a-z-]+|\/customers\/(?:stats|book|search|monthly-sales|month-orders|order-items|block(?:\/setting|\/mobiles)?|(?:point|prepayment)\/(?:history|balance))|\/chat\/(?:settings|unread|quick-replies|rooms(?:\/\d+(?:\/messages)?)?)|\/sms\/(?:history(?:\/\d+)?|stats|info|templates(?:\/\d+)?|block(?:\/log)?|address\/(?:groups|contacts)(?:\/\d+)?|charge\/history)|\/images(?:\/folders)?|\/badges|\/delivery-fee\/(?:fees|shop-city)|\/delivery-route\/(?:setting|teams|origins|progress(?:\/stops)?)|\/recurring-orders\/(?:summary|detail\/\d+|urlorder-items\/\d+)|\/event-calendar)$/u.test(
         path,
@@ -122,6 +126,8 @@ export async function liveApi(request: Request) {
         throw new LiveError("요청 확인 헤더가 필요합니다.", 403);
     }
     if (path === "/logout" || path === "/auth/logout") {
+      const ownerToken=cookieValue(request,'orderflow_owner');
+      if(ownerToken)await getD1().prepare('DELETE FROM of_owner_sessions WHERE hash=?').bind(await sha256Hex(ownerToken)).run();
       const token = request.headers
         .get("cookie")
         ?.split(";")
@@ -135,6 +141,7 @@ export async function liveApi(request: Request) {
           .run();
       const headers = new Headers({ "Cache-Control": "no-store" });
       headers.append("Set-Cookie", clearedSessionCookie());
+      headers.append('Set-Cookie',clearCookie('orderflow_owner'));
       headers.append(
         "Set-Cookie",
         "orderflow_staff=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
@@ -151,7 +158,7 @@ export async function liveApi(request: Request) {
     const raw = mutation && !isUpload ? await readInput(request) : {};
     const data: Doc = { ...Object.fromEntries(url.searchParams), ...obj(raw) };
     if (path === "/login" || path === "/auth/login")
-      return liveLogin(request, data);
+      return await liveLogin(request, data);
     const c = await context(request);
     authorize(c, path, method);
     if (path === "/workspace") {
@@ -203,7 +210,7 @@ export async function liveApi(request: Request) {
       const after = Number(data.after ?? 0);
       const events = await query(
         c,
-        "SELECT id,kind,entity,created_at FROM of_changes WHERE shop=? AND id>? ORDER BY id LIMIT 100",
+        "SELECT id,kind,entity,created_at FROM of_changes WHERE shop=? AND id>? ORDER BY id LIMIT 500",
         c.shop,
         after,
       );
@@ -233,6 +240,7 @@ export async function liveApi(request: Request) {
     }
     const handlers = [
       accountsApi,
+      customerAccessApi,
       formsApi,
       ordersApi,
       customersApi,

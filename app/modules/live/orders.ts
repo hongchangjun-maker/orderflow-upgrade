@@ -1,4 +1,6 @@
 import { sha256Hex } from "../../lib/security";
+import { orderRows, orderDetail } from "./order-reader";
+export { orderRows, orderDetail } from "./order-reader";
 import {
   assertSameCustomer,
   cartOf,
@@ -13,6 +15,12 @@ import {
   type Doc,
 } from "./domain";
 import { formDetail } from "./forms";
+import { quoteOrder } from "./order-quote";
+import { amountDue } from "./pricing";
+import { exportOrders } from "./order-export";
+import { quoteFee } from "./fee-service";
+import { paymentOptions } from "./pricing";
+import {catalogState} from './catalog-rules';
 import {
   audit,
   first,
@@ -22,135 +30,16 @@ import {
   transaction,
   type LiveContext,
 } from "./store";
-export async function orderRows(c: LiveContext, filter: Doc = {}) {
-  const from =
-      text(filter.frDate ?? filter.fr_date).replaceAll("-", "") || "00000000",
-    to =
-      text(filter.toDate ?? filter.to_date).replaceAll("-", "") || "99999999";
-  const result = await query(
-    c,
-    "SELECT o.*,c.name cust_name,c.mobile FROM of_orders o JOIN of_customers c ON c.id=o.customer_id WHERE o.shop=? AND o.order_date BETWEEN ? AND ? AND o.merged_into IS NULL AND (?='' OR o.key=?) ORDER BY o.id DESC LIMIT 5000",
-    c.shop,
-    from,
-    to,
-    text(filter.key),
-    text(filter.key),
-  );
-  const keyword = text(filter.searchData ?? filter.search).toLowerCase();
-  const output: Doc[] = [];
-  const ids = JSON.stringify(result.map((o) => o.id));
-  const membersAll = await query(
-    c,
-    "SELECT id,key,amount,fee,merged_into FROM of_orders WHERE shop=? AND (id IN (SELECT value FROM json_each(?)) OR merged_into IN (SELECT value FROM json_each(?)))",
-    c.shop,
-    ids,
-    ids,
-  );
-  const linesAll = await query(
-    c,
-    "SELECT i.*,o.merged_into FROM of_order_items i JOIN of_orders o ON o.id=i.order_id WHERE o.shop=? AND (o.id IN (SELECT value FROM json_each(?)) OR o.merged_into IN (SELECT value FROM json_each(?)))",
-    c.shop,
-    ids,
-    ids,
-  );
-  const memberMap = new Map<number, Doc[]>(),
-    lineMap = new Map<number, Doc[]>();
-  for (const m of membersAll) {
-    const id = Number(m.merged_into ?? m.id);
-    memberMap.set(id, [...(memberMap.get(id) ?? []), m]);
-  }
-  for (const l of linesAll) {
-    const id = Number(l.merged_into ?? l.order_id);
-    lineMap.set(id, [...(lineMap.get(id) ?? []), l]);
-  }
-  for (const o of result) {
-    const members = memberMap.get(Number(o.id)) ?? [o],
-      lines = lineMap.get(Number(o.id)) ?? [];
-    const data = parse(o.data);
-    const total = members.reduce(
-      (n, r) => n + Number(r.amount) + Number(r.fee),
-      0,
-    );
-    const row = {
-      ...data,
-      ocodekey: o.key,
-      orderno: Number(o.id),
-      uocode: Number(o.form_id),
-      cust_name: o.cust_name,
-      mobile: o.mobile,
-      order_date: o.order_date,
-      status: o.status,
-      ispaid: o.ispaid,
-      finbank: o.ispaid,
-      order_amt: members.reduce((n, r) => n + Number(r.amount), 0),
-      delivery_amt: members.reduce((n, r) => n + Number(r.fee), 0),
-      tamt: total,
-      total_amt: total,
-      tqty: lines.length,
-      item_summary: lines[0]?.name ?? "",
-      contents: lines.map((i) => `${i.name} ${i.quantity}${i.unit}`).join("\n"),
-      revision: o.revision,
-      isrt_date: o.created_at,
-      update_date: o.updated_at,
-      point: 0,
-      saved_point: 0,
-      isrt_user: "고객",
-      sms_result: "",
-      memberKeys: members.map((m) => m.key),
-      ordernumber:
-        members.length > 1 ? members.map((m) => m.key).join(",") : "",
-    };
-    if (
-      keyword &&
-      !`${o.cust_name} ${o.mobile} ${o.id} ${data.addr}`
-        .toLowerCase()
-        .includes(keyword)
-    )
-      continue;
-    output.push(row);
-  }
-  return output;
-}
 export async function createLiveOrder(
   c: LiveContext,
   formId: number,
   input: Doc,
 ) {
   const detail = await formDetail(c, formId);
-  const form = await first(
-    c,
-    "SELECT active FROM of_forms WHERE id=? AND shop=?",
-    formId,
-    c.shop,
-  );
-  if (!form?.active) throw new LiveError("마감된 주문서입니다.", 409);
+  if (detail.setting.use_gbn!=='Y') throw new LiveError("마감된 주문서입니다.", 409);
   const setting = detail.setting;
   const time = now();
-  const kst =
-    day() +
-    new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Asia/Seoul",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    })
-      .format(new Date())
-      .replace(":", "");
-  const open =
-    text(setting.open_date).replaceAll("-", "") +
-    text(setting.open_time || "0000");
-  const close =
-    text(setting.expire_date).replaceAll("-", "") +
-    text(setting.expire_time || "2359");
-  if (
-    (/^\d{12}$/u.test(open) && kst < open) ||
-    (/^\d{12}$/u.test(close) && kst > close)
-  )
-    throw new LiveError("주문 접수 기간이 아닙니다.", 409);
-  if (
-    (setting.open_at && time < String(setting.open_at)) ||
-    (setting.close_at && time > String(setting.close_at))
-  )
+  if (catalogState(setting).status!=='LIVE')
     throw new LiveError("주문 접수 기간이 아닙니다.", 409);
   const mobile = mobileOf(input.mobile ?? input.phone);
   const name = required(input.cust_name ?? input.name, "고객명", 80);
@@ -166,6 +55,7 @@ export async function createLiveOrder(
       addr2: text(input.addr2 ?? input.addressDetail, 200),
       delivery_gbn: text(input.delivery_gbn ?? "direct"),
       delivery_memo: text(input.delivery_memo ?? input.note, 1000),
+      pay_gbn: text(input.pay_gbn??'transfer'),point_used:Number(input.point_used??input.point??0),delivery_seqno:text(input.delivery_seqno),pickup_time:text(input.pickup_time),cash_receipt:text(input.cash_receipt),cash_receipt_no:text(input.cash_receipt_no),ispresent:text(input.ispresent),present_receiver:text(input.present_receiver),present_mobile:text(input.present_mobile),
     }),
   );
   const existing = await first(
@@ -222,10 +112,9 @@ export async function createLiveOrder(
     (delivery === "parcel" && setting.delivery_parcel !== "Y")
   )
     throw new LiveError("선택할 수 없는 배송 방법입니다.", 422);
-  const fee =
-    delivery === "pickup"
-      ? 0
-      : integer(setting.shipping_fee ?? setting.delivery_amt ?? 0);
+  const quote=await quoteOrder(c,formId,input,false,'',detail);
+  if(quote.amount!==amount)throw new LiveError("상품 금액이 변경됐습니다. 다시 확인해 주세요.",409,"revision_conflict");
+  const {fee,point_used,point_earn_potential,saved_point,adjustment,total}=quote;
   const key = crypto.randomUUID();
   const data = {
     cust_name: name,
@@ -233,19 +122,25 @@ export async function createLiveOrder(
     addr: text(input.addr ?? input.address, 400),
     addr2: text(input.addr2 ?? input.addressDetail, 200),
     delivery_gbn: delivery,
-    pay_gbn: "transfer",
+    pay_gbn: quote.pay,
     delivery_memo: text(input.delivery_memo ?? input.note, 1000),
     memo: "",
-    point: 0,
-    iscashreceipt: "N",
-    ispresent: "N",
+    point: point_used,point_used,point_earn_potential,saved_point,adjustment,
+    pickup_time:text(input.pickup_time,80),
+    iscashreceipt: 'N',
+    cash_receipt_requested:input.cash_receipt==='Y',
+    cash_receipt:text(input.cash_receipt_no,40),
+    cash_receipt_no:text(input.cash_receipt_no,40),
+    ispresent:input.ispresent==='Y'?'Y':'N',
+    present_receiver:text(input.present_receiver,80),
+    present_mobile:text(input.present_mobile,30),
   };
   if (delivery !== "pickup" && !data.addr)
     throw new LiveError("배송 주소를 입력해 주세요.", 422);
   const statements = [
     c.db
       .prepare(
-        "INSERT INTO of_customers(shop,mobile,name,data,created_at) VALUES(?,?,?,?,?) ON CONFLICT(shop,mobile) DO UPDATE SET name=excluded.name,data=excluded.data",
+        "INSERT INTO of_customers(shop,mobile,name,data,created_at) VALUES(?,?,?,?,?) ON CONFLICT(shop,mobile) DO UPDATE SET name=excluded.name,data=json_patch(of_customers.data,excluded.data)",
       )
       .bind(c.shop, mobile, name, JSON.stringify(data), time),
     c.db
@@ -268,6 +163,10 @@ export async function createLiveOrder(
         time,
       ),
   ];
+  for(const [kind,delta,operation] of [['point',-point_used,`point-order:${key}`],['prepay',quote.pay==='prepay'?-total:0,`prepay-order:${key}`]] as const){
+    if(delta)statements.push(kind==='prepay'?c.db.prepare("INSERT INTO of_ledger(shop,mobile,kind,delta,memo,operation,actor,created_at) SELECT ?,?,'prepay',-(amount+fee-COALESCE(json_extract(data,'$.point_used'),0)+COALESCE(json_extract(data,'$.adjustment'),0)),?,?,?,? FROM of_orders WHERE key=?").bind(c.shop,mobile,'주문 결제',operation,c.actor,time,key):c.db.prepare('INSERT INTO of_ledger(shop,mobile,kind,delta,memo,operation,actor,created_at) VALUES(?,?,?,?,?,?,?,?)').bind(c.shop,mobile,kind,delta,'주문 결제',operation,c.actor,time));
+  }
+  if(quote.pay==='prepay')statements.push(c.db.prepare("UPDATE of_orders SET ispaid='Y' WHERE key=?").bind(key));
   for (const i of items)
     statements.push(
       c.db
@@ -307,39 +206,6 @@ export async function createLiveOrder(
   const order = await first(c, "SELECT id FROM of_orders WHERE key=?", key);
   await audit(c, "order:new", key);
   return { orderNo: order?.id, key, replayed: false };
-}
-export async function orderDetail(c: LiveContext, key: unknown) {
-  const order = await first(
-    c,
-    "SELECT * FROM of_orders WHERE key=? AND shop=?",
-    text(key),
-    c.shop,
-  );
-  if (!order) throw new LiveError("주문을 찾을 수 없습니다.", 404);
-  if (order.merged_into)
-    throw new LiveError("병합 대표 주문에서 조회해 주세요.", 409);
-  const header = (await orderRows(c, { key }))[0];
-  const items = await query(
-    c,
-    "SELECT i.* FROM of_order_items i JOIN of_orders o ON i.order_id=o.id WHERE o.shop=? AND (o.id=? OR o.merged_into=?)",
-    c.shop,
-    order.id,
-    order.id,
-  );
-  return {
-    header,
-    items: items.map((i) => ({
-      ...i,
-      seqno: i.id,
-      iname: i.name,
-      item_name: i.name,
-      disp: i.name,
-      qty: i.quantity,
-      cost: i.price,
-      amt: Number(i.quantity) * Number(i.price),
-    })),
-    availableItems: (await formDetail(c, Number(order.form_id))).items,
-  };
 }
 export async function ordersApi(
   c: LiveContext,
@@ -447,19 +313,28 @@ export async function ordersApi(
     ])
       if (header[field] !== undefined) next[field] = text(header[field], 1000);
     const status = text(header.status ?? old.status);
-    const children = await query(
-      c,
-      "SELECT fee FROM of_orders WHERE shop=? AND merged_into=?",
-      c.shop,
-      old.id,
-    );
-    const fee = integer(header.delivery_amt ?? old.fee);
+    const children=await query(c,"SELECT fee,amount,data FROM of_orders WHERE shop=? AND merged_into=?",c.shop,old.id);
+    const used=Number(next.point_used??0);
+    const billUsed=used+children.reduce((n,o)=>n+Number(parse(o.data).point_used??0),0);
+    const oldDiscount=billUsed-Number(next.adjustment??0)-children.reduce((n,o)=>n+Number(parse(o.data).adjustment??0),0);
+    const billAmount=Number(old.amount)+children.reduce((n,o)=>n+Number(o.amount),0);
+    const discount=header.damt==null?oldDiscount:integer(header.damt,billUsed,billAmount);
+    if(children.length&&discount!==oldDiscount)throw new LiveError('병합 주문의 할인은 개별 변경할 수 없습니다.',409);
+    if(old.ispaid==='Y'&&discount!==oldDiscount)throw new LiveError('결제된 주문의 할인은 변경할 수 없습니다.',409);
+    if(discount!==oldDiscount){
+      next.adjustment=used-discount;
+      const settings=(await formDetail(c,Number(old.form_id))).setting;
+      next.point_earn_potential=settings.use_customer_save_point==='Y'?Math.floor(Math.max(0,Number(old.amount)-discount)*Number(settings.customer_point_rate??0)/100):0;
+    }
+    if(header.cash_receipt!==undefined){next.cash_receipt_no=text(header.cash_receipt,40);next.cash_receipt_requested=!!next.cash_receipt_no;}
+    const billFee=Number(old.fee)+children.reduce((n,o)=>n+Number(o.fee),0);
+    const fee = integer(header.delivery_amt ?? billFee);
     if (
       children.length &&
       fee !== Number(old.fee) + children.reduce((n, o) => n + Number(o.fee), 0)
     )
       throw new LiveError("병합 주문의 배송비는 변경할 수 없습니다.", 409);
-    if (old.ispaid === "Y" && fee !== Number(old.fee))
+    if (old.ispaid === "Y" && fee !== billFee)
       throw new LiveError("결제된 주문의 금액은 변경할 수 없습니다.", 409);
     if (!["00", "10", "22", "24", "30", "40"].includes(status))
       throw new LiveError("주문 상태를 확인해 주세요.", 422);
@@ -499,6 +374,7 @@ export async function ordersApi(
       merged
     )
       throw new LiveError("변경할 수 없는 주문입니다.", 409);
+    if(Number(parse(old.data).point_used)>0)throw new LiveError("포인트 사용 주문은 취소 후 다시 주문해 주세요.",409);
     const detail = await formDetail(c, Number(old.form_id));
     const cart = cartOf(
       rows(data.items).map((line) => {
@@ -523,6 +399,9 @@ export async function ordersApi(
       (n, i) => n + Number(i.item.cost) * i.qty,
       0,
     );
+    const oldData=parse(old.data);
+    const revised=await quoteOrder(c,Number(old.form_id),{...oldData,items:cart.map(i=>({seqno:i.id,qty:i.qty}))},true,String(old.key));
+    if(revised.amount!==amount)throw new LiveError("상품 금액이 변경됐습니다. 다시 확인해 주세요.",409,"revision_conflict");
     const statements = [
       c.db.prepare("DELETE FROM of_order_items WHERE order_id=?").bind(old.id),
     ];
@@ -537,20 +416,22 @@ export async function ordersApi(
     statements.push(
       c.db
         .prepare(
-          "UPDATE of_orders SET amount=?,revision=revision+1,updated_at=? WHERE id=? AND shop=?",
+          "UPDATE of_orders SET amount=?,fee=?,data=?,revision=revision+1,updated_at=? WHERE id=? AND shop=?",
         )
-        .bind(amount, now(), old.id, c.shop),
+        .bind(amount,revised.fee,JSON.stringify({...oldData,point_earn_potential:revised.point_earn_potential}), now(), old.id, c.shop),
     );
     await transaction(c, statements, [
       {
         sql: "EXISTS(SELECT 1 FROM of_orders WHERE id=? AND shop=? AND revision=? AND status NOT IN ('30','40') AND merged_into IS NULL)",
         values: [old.id, c.shop, data.revision ?? old.revision],
       },
+      {sql:"NOT EXISTS(SELECT 1 FROM json_each(?) x LEFT JOIN of_items i ON i.id=json_extract(x.value,'$.id') WHERE i.id IS NULL OR i.active<>1 OR i.price<>json_extract(x.value,'$.price') OR i.form_id<>? OR i.shop<>?)",values:[JSON.stringify(selected.map(i=>({id:i.id,price:i.item.cost}))),old.form_id,c.shop]},
     ]);
     await audit(c, "order:items", old.key);
     return {
       order_amt: amount,
-      delivery_amt: old.fee,
+      delivery_amt: revised.fee,
+      revision:(await first(c,'SELECT revision FROM of_orders WHERE id=? AND shop=?',old.id,c.shop))?.revision,
       contents: selected.map((i) => `${i.item.iname} ${i.qty}`).join("\n"),
     };
   }
@@ -592,6 +473,10 @@ export async function ordersApi(
     )
       return { error_no: 0, ocodekey: parent.key, replayed: true };
     assertSameCustomer(orders);
+    if (orders.some((o) => o.order_date!==parent.order_date))
+      throw new LiveError("같은 주문일의 주문만 병합할 수 있습니다.",409);
+    if (orders.some((o) => Number(obj(o.data).point_used)>0))
+      throw new LiveError("포인트를 사용한 주문은 개별 처리해 주세요.",409);
     if (orders.some((o) => o.status === "30" || o.ispaid === "Y"))
       throw new LiveError("미결제·미완료 주문만 병합할 수 있습니다.", 409);
     const children = await first(
@@ -662,13 +547,13 @@ export async function ordersApi(
       }
       const members = await query(
         c,
-        "SELECT amount,fee FROM of_orders WHERE shop=? AND (id=? OR merged_into=?)",
+        "SELECT amount,fee,data FROM of_orders WHERE shop=? AND (id=? OR merged_into=?)",
         c.shop,
         order.id,
         order.id,
       );
       const total = members.reduce(
-        (n, o) => n + Number(o.amount) + Number(o.fee),
+        (n, o) => n + amountDue({...o,data:parse(o.data)}),
         0,
       );
       if (total <= 0 || order.ispaid === "Y")
@@ -717,7 +602,7 @@ export async function ordersApi(
     };
   }
   if (path === "/orders/excel-data")
-    return { orders: await orderRows(c, data), items: [] };
+    return exportOrders(c,data);
   if (path === "/orders/delivery-methods")
     return [
       {
@@ -742,21 +627,13 @@ export async function ordersApi(
       },
     ];
   if (path === "/orders/pay-methods")
-    return [
-      {
-        code: "transfer",
-        code_name: "transfer",
-        name: "계좌이체",
-        pay_name: "계좌이체",
-      },
-    ];
-  if (path === "/orders/compute-delivery-amt")
+    return (data.uocode?paymentOptions((await formDetail(c,Number(data.uocode))).setting,(await formDetail(c,Number(data.uocode))).payMethods):paymentOptions({pay_store:'Y',pay_prepay:'Y'})).map(p=>({code:p.value,code_name:p.value,name:p.label,pay_name:p.label,use_tran_name:p.value==='transfer'?'Y':'N',use_credit_card:'N',use_cash_receipt:p.value==='prepay'?'N':'Y'}));
+  if (path === "/orders/compute-delivery-amt"){
+    const id=integer(data.uocode,1,Number.MAX_SAFE_INTEGER),form=await formDetail(c,id);
     return {
-      delivery_amt: Number(
-        (await formDetail(c, integer(data.uocode, 1, Number.MAX_SAFE_INTEGER)))
-          .setting.shipping_fee ?? 0,
-      ),
+      delivery_amt: await quoteFee(c,id,form.setting,integer(data.order_amt??data.amount??0),text(data.delivery_gbn)||'direct',text(data.addr??data.address)),
     };
+  }
   if (path === "/orders/share-link") {
     const o = await first(
       c,

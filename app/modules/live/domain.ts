@@ -17,10 +17,12 @@ export const integer = (v: unknown, min = 0, max = 1000000000): number => {
 export class LiveError extends Error {
   status: number;
   code: string;
-  constructor(message: string, status = 400, code = "invalid_request") {
+  details?: unknown;
+  constructor(message: string, status = 400, code = "invalid_request",details?:unknown) {
     super(message);
     this.status = status;
     this.code = code;
+    this.details=details;
   }
 }
 export function required(v: unknown, label: string, max = 200) {

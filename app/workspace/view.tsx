@@ -19,6 +19,7 @@ export function Workspace() {
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false),
     [operation, setOperation] = useState(operationId);
+  const [accessUrl,setAccessUrl]=useState('');
   const load = useCallback(
     () =>
       liveRequest<Snapshot>("/api/replica/workspace")
@@ -43,13 +44,15 @@ export function Workspace() {
     setBusy(true);
     setMessage("");
     try {
-      await liveRequest(`/api/replica/${path}`, {
+      const result=await liveRequest<Row>(`/api/replica/${path}`, {
         ...input,
         operation,
         idempotencyKey: operation,
       });
       setOperation(operationId());
       setMessage("서버 저장을 완료했습니다.");
+      if(typeof result.url==='string')setAccessUrl(result.url);
+      if(path==='auth/change-password'){window.location.assign('/sign-in');return;}
       form.reset();
       await load();
     } catch (e) {
@@ -64,6 +67,7 @@ export function Workspace() {
         <p>ORDERFLOW · 실제 운영</p>
         <h1>{data?.seller.mname ?? "상점"} 업무 설정</h1>
         <Link href="/replica">원본형 운영 화면으로 →</Link>
+        <p><Link href="/help">사용 안내</Link> · <Link href="/support">자체 문의함 관리자 답변</Link></p>
         <p>
           문자·은행·카카오·현금영수증의 외부 연동은 연결 대기입니다. 아래 자료는
           실제 서버에 저장됩니다.
@@ -125,6 +129,7 @@ export function Workspace() {
       </section>
       <section>
         <h2>포인트·선결제 거래 원장</h2>
+        <details><summary>고객전용 주문·잔액 확인 링크 발급</summary><p>본인 확인된 고객에게만 별도로 전달하세요. 링크와 확인번호를 함께 공개하지 마세요. 30일 후 만료됩니다.</p><form onSubmit={e=>submit(e,'customers/access-link')}><label>고객 휴대폰<input name="mobile" inputMode="tel" required/></label><label>주문서 (선택)<select name="uocode"><option value="">나의 주문·잔액 페이지</option>{data?.forms.map(f=><option key={String(f.uocode)} value={String(f.uocode)}>{String(f.title??f.uname)}</option>)}</select></label><label>확인번호 (비우면 전화번호 뒤 4자리)<input name="pin" type="password" inputMode="numeric" minLength={4} maxLength={8} autoComplete="off"/></label><button disabled={busy}>전용 링크 발급</button></form>{accessUrl&&<p><a href={accessUrl} target="_blank" rel="noreferrer">발급된 고객전용 링크 열기</a><br/><code style={{overflowWrap:'anywhere'}}>{accessUrl}</code></p>}</details>
         <p>
           잔액보다 큰 차감은 서버에서 거절하며, 같은 처리 식별자의 재시도는 중복
           반영하지 않습니다.
@@ -185,10 +190,9 @@ export function Workspace() {
           </form>
           <p>권한은 원본형 화면의 ‘설정 → 아이디·권한’에서 변경합니다.</p>
           {data.staff.map((s) => (
-            <p key={String(s.id)}>
-              {String(s.name)} · {String(s.login)} · {String(s.role)}
-            </p>
+            <details key={String(s.id)}><summary>{String(s.name)} · {String(s.login)} · {s.active?'활성':'중지'}</summary><form onSubmit={e=>submit(e,`staff/${s.id}/reset-password`)}><label>새 임시 비밀번호<input name="newPassword" type="password" minLength={10} required autoComplete="new-password"/></label><button disabled={busy}>비밀번호 재설정 · 기존 세션 종료</button></form><form onSubmit={e=>submit(e,`staff/${s.id}/disable`)}><button disabled={busy||!s.active}>직원 계정 중지 · 기존 세션 종료</button></form></details>
           ))}
+          <details><summary>사장님 비밀번호 변경</summary><form onSubmit={e=>submit(e,'auth/change-password')}><label>현재 비밀번호<input name="currentPassword" type="password" required autoComplete="current-password"/></label><label>새 비밀번호<input name="newPassword" type="password" minLength={10} required autoComplete="new-password"/></label><button disabled={busy}>변경하고 다시 로그인</button></form></details>
         </section>
       )}
       <section>

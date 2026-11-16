@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { runRecurring } from "../app/modules/live/operations";
+import {REPLICA_ASSET_VERSION} from "../app/modules/live/release";
 
 type WorkerEnv = Env & {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -21,6 +22,12 @@ function secureResponse(response: Response, pathname: string): Response {
     headers.set("Cache-Control", "no-store");
   }
   if (pathname.startsWith("/admin") || pathname.startsWith("/api/admin")) headers.set("X-Robots-Tag", "noindex, nofollow");
+  if(pathname.startsWith('/live-file/')){
+    headers.set('Content-Security-Policy',"sandbox; default-src 'none'; frame-ancestors 'none'");
+    headers.set('Referrer-Policy','no-referrer');
+    headers.set('Cache-Control','no-store');
+    headers.set('X-Robots-Tag','noindex, nofollow');
+  }
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -33,9 +40,17 @@ function secureResponse(response: Response, pathname: string): Response {
 const worker = {
   async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const replicaAsset=url.pathname.match(/^\/replica-assets\/([^/]+)\/(application\.js|runtime\.mjs|order-dto\.mjs)$/u);
+    if(replicaAsset){
+      if(replicaAsset[1]!==REPLICA_ASSET_VERSION)return new Response('Not found',{status:404});
+      const target=new URL('/replica-assets/'+replicaAsset[2],request.url);
+      const response=env.ASSETS?await env.ASSETS.fetch(new Request(target,request)):String(env.ENVIRONMENT)!=='production'&&['localhost','127.0.0.1'].includes(url.hostname)?await fetch(new Request(target,request)):new Response('Assets unavailable',{status:503});
+      const headers=new Headers(response.headers);headers.set('Cache-Control','public, max-age=31536000, immutable');
+      return secureResponse(new Response(response.body,{status:response.status,headers}),url.pathname);
+    }
     if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) {
       const size = Number(request.headers.get("content-length") ?? "0");
-      const maxSize=url.pathname.startsWith("/api/replica/")&&/upload|\/logo$/u.test(url.pathname)?2_100_000:65_536;
+      const maxSize=(url.pathname.startsWith("/api/replica/")&&/upload|\/logo$/u.test(url.pathname)||/^\/api\/live-public\/chat\/[a-f\d]{32}\/upload$/u.test(url.pathname))?10_100_000:65_536;
       if (!Number.isFinite(size) || size > maxSize) return secureResponse(Response.json({ error: "요청 내용이 너무 큽니다." }, { status: 413 }), url.pathname);
       const origin = request.headers.get("origin");
       if (origin && origin !== url.origin) return secureResponse(Response.json({ error: "허용되지 않은 요청 출처입니다." }, { status: 403 }), url.pathname);
