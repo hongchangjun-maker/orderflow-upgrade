@@ -24,7 +24,9 @@
     }
   ],
   "vars": {
-    "ENVIRONMENT": "staging"
+    "ENVIRONMENT": "staging",
+    "PUBLIC_TEST_ENTRY":"1",
+    "PUBLIC_TEST_MODE":"1"
   },
   "r2_buckets": [{"binding":"LIVE_MEDIA","bucket_name":"orderflow-upgrade-staging-media"}],
   "observability": {

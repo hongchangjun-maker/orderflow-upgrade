@@ -21,6 +21,8 @@ const owners = {
   html: "html-safety",
   store: "persistence",
   context: "authorization",
+  'test-access':'isolated-test-provisioning',
+  'test-mode':'test-entry-config',
   accounts: "identity",
   forms: "catalog",
   orders: "orders",

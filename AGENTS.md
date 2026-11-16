@@ -1,5 +1,7 @@
 # ORDERFLOW independent production contracts
 
+- Temporary test entry owns `live/test-mode.ts` (strict staging-only flag/URL) and `live/test-access.ts` (rate-limited per-browser private sample shop and12-hour HttpOnly session). Root `/` temporarily goes through `/try` to the separate staging Worker; production `/api/test-session` MUST return404 even if PUBLIC_TEST_MODE=1. Never enable anonymous access to production DB. Existing guest sessions must be rejected when test mode is disabled. Test products/orders are real staging records, not production fixtures and not the old local demo. Disable with PUBLIC_TEST_ENTRY=0 in production and PUBLIC_TEST_MODE=0 in staging, then redeploy; never delete business data as a rollback step.
+
 - NEVER access or mutate the original site, its account, credentials or customer/order data. Only this independent repository, Worker, D1 and media buckets are writable.
 - Preserve generated orange presentation bytes and routes. `application.js` SHA is pinned in provenance. Runtime transport replacement is intentional and authorized; no source server calls.
 - Preserve old `/admin`, `/admin/secure`, `/order/fresh-market`, `/overview` and legacy API/schema contracts.

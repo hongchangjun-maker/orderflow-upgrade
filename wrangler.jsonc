@@ -17,7 +17,8 @@
     }
   ],
   "vars": {
-    "ENVIRONMENT": "production"
+    "ENVIRONMENT": "production",
+    "PUBLIC_TEST_ENTRY":"1"
   },
   "r2_buckets": [{"binding":"LIVE_MEDIA","bucket_name":"orderflow-upgrade-media"}],
   "triggers": {

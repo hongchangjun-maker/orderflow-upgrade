@@ -132,6 +132,7 @@ export async function accountsApi(
         role: c.role,
         userLevel: c.role === "OWNER" ? 40 : 10,
         isAdmin: false,
+        testMode:c.permissions.testMode===true,
       },
       providers: {
         sms: false,

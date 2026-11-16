@@ -4,6 +4,7 @@ import { sha256Hex } from "../../lib/security";
 import { LiveError } from "./domain";
 import { parse, type LiveContext } from "./store";
 import {ownerSession} from './owner-auth';
+import {publicTestEnabled} from './test-mode';
 const initializedShops = new Set<string>();
 export async function context(request: Request): Promise<LiveContext> {
   const db = getD1();
@@ -25,6 +26,7 @@ export async function context(request: Request): Promise<LiveContext> {
         role: string;
         permissions: string;
       }>();
+    if(user&&parse(user.permissions).testMode===true&&!publicTestEnabled())throw new LiveError('테스트 접속이 종료되었습니다.',401,'unauthenticated');
     if (user)
       return {
         db,

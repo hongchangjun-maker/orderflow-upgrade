@@ -14,7 +14,7 @@ before(async () => {
       persist: false,
       logLevel: "error",
       port: 0,
-      vars: { ENVIRONMENT: "production", LOCAL_ADMIN_BYPASS: "0" },
+      vars: { ENVIRONMENT: "production", LOCAL_ADMIN_BYPASS: "0",PUBLIC_TEST_MODE:'1',PUBLIC_TEST_ENTRY:'1' },
       experimental: { disableExperimentalWarning: true, watch: false },
     },
   );
@@ -51,7 +51,17 @@ test("requires a server session at reconstructed business routes", async () => {
   }
   const home = await render();
   assert.ok([302, 303, 307, 308].includes(home.status));
-  assert.match(home.headers.get("location"), /\/replica$/);
+  assert.match(home.headers.get("location"), /\/try$/);
+});
+
+test('temporary public entry cannot create an unauthenticated production owner even with its mode flag set',async()=>{
+  const entry=await render('/try');assert.equal(entry.status,303);assert.equal(entry.headers.get('location'),'https://orderflow-korea-upgrade-staging.hhongcjun.workers.dev/try');
+  const denied=await testWorker.fetch('/api/test-session',{method:'POST',headers:{'x-orderflow-request':'1'}});assert.equal(denied.status,404);assert.equal(denied.headers.get('set-cookie'),null);
+});
+
+test('temporary default login redirects to testing but explicit live login remains available',async()=>{
+  const hidden=await render('/sign-in');assert.ok([303,307,308].includes(hidden.status));assert.match(hidden.headers.get('location'),/\/try$/u);
+  const live=await render('/sign-in?mode=live');assert.equal(live.status,200);assert.match(await live.text(),/운영 로그인/u);
 });
 
 test("server-renders the finished ORDERFLOW landing page", async () => {
