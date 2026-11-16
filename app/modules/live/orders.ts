@@ -164,7 +164,7 @@ export async function createLiveOrder(
       ),
   ];
   for(const [kind,delta,operation] of [['point',-point_used,`point-order:${key}`],['prepay',quote.pay==='prepay'?-total:0,`prepay-order:${key}`]] as const){
-    if(delta)statements.push(kind==='prepay'?c.db.prepare("INSERT INTO of_ledger(shop,mobile,kind,delta,memo,operation,actor,created_at) SELECT ?,?,'prepay',-(amount+fee-COALESCE(json_extract(data,'$.point_used'),0)+COALESCE(json_extract(data,'$.adjustment'),0)),?,?,?,? FROM of_orders WHERE key=?").bind(c.shop,mobile,'주문 결제',operation,c.actor,time,key):c.db.prepare('INSERT INTO of_ledger(shop,mobile,kind,delta,memo,operation,actor,created_at) VALUES(?,?,?,?,?,?,?,?)').bind(c.shop,mobile,kind,delta,'주문 결제',operation,c.actor,time));
+    if(delta)statements.push(kind==='prepay'?c.db.prepare("INSERT INTO of_ledger(shop,mobile,kind,delta,memo,operation,actor,created_at) SELECT ?,?,'prepay',-(amount+fee-COALESCE(json_extract(data,'$.point_used'),0)+COALESCE(json_extract(data,'$.adjustment'),0)),?,?,?,? FROM of_orders WHERE key=? AND amount+fee-COALESCE(json_extract(data,'$.point_used'),0)+COALESCE(json_extract(data,'$.adjustment'),0)>0").bind(c.shop,mobile,'주문 결제',operation,c.actor,time,key):c.db.prepare('INSERT INTO of_ledger(shop,mobile,kind,delta,memo,operation,actor,created_at) VALUES(?,?,?,?,?,?,?,?)').bind(c.shop,mobile,kind,delta,'주문 결제',operation,c.actor,time));
   }
   if(quote.pay==='prepay')statements.push(c.db.prepare("UPDATE of_orders SET ispaid='Y' WHERE key=?").bind(key));
   for (const i of items)

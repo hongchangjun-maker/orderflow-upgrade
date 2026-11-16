@@ -115,6 +115,16 @@ export async function runParity(base,cookie='',owner){
   assert.equal(ok(await api('/customers/point/balance?mobile='+prepaidMobile)).balance,2000);
   ok(await api('/orders/status',{orders:prepaid.map(r=>({ocodekey:r.data.key})),status:'40'}));
   assert.equal(ok(await api('/customers/prepayment/balance?mobile='+prepaidMobile)).balance,50000);assert.equal(ok(await api('/customers/point/balance?mobile='+prepaidMobile)).balance,5000);
+  const allPointMobile='010'+String(Number(prepaidMobile.slice(-8))+1).padStart(8,'0');
+  for(const [kind,delta]of [['point',21000],['prepay',30000]])ok(await api('/customers/ledger',{mobile:allPointMobile,kind,delta,operation:kind+'-full-point-'+run}));
+  const allPointLink=ok(await api('/customers/access-link',{mobile:allPointMobile,uocode:id}));
+  const allPointProfile=await request('/api/live-public/customer/'+allPointLink.token,{pin:allPointMobile.slice(-4)});ok(allPointProfile);
+  const allPointOrders=await Promise.all([0,1,2].map(i=>request('/api/live-public/form/'+token,{...payload,mobile:allPointMobile,pay_gbn:'prepay',point_used:7000,idempotencyKey:run+'-full-point-'+i},'POST',allPointProfile.cookie)));
+  allPointOrders.forEach(ok);
+  assert.equal(ok(await api('/customers/prepayment/balance?mobile='+allPointMobile)).balance,27000);
+  assert.equal(ok(await api('/customers/point/balance?mobile='+allPointMobile)).balance,0);
+  ok(await api('/orders/status',{orders:allPointOrders.map(r=>({ocodekey:r.data.key})),status:'40'}));
+  assert.equal(ok(await api('/customers/prepayment/balance?mobile='+allPointMobile)).balance,30000);assert.equal(ok(await api('/customers/point/balance?mobile='+allPointMobile)).balance,21000);
   pass('simultaneous prepaid point orders use final fee-once payable and cancel refunds exact debits');
   const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jVJkAAAAASUVORK5CYII=','base64');
   const chunk=Buffer.alloc(10_000_000-png.length);chunk.writeUInt32BE(chunk.length-12,0);chunk.write('ofQa',4);
