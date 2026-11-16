@@ -26,6 +26,8 @@ export function failure(error: unknown) {
       { status: error.status, headers: { "Cache-Control": "no-store" } },
     );
   const message = String(error);
+  if (/D1.*(?:overloaded|transient issue|storage operation exceeded timeout)/iu.test(message))
+    return Response.json({success:false,error:{code:'temporarily_busy',message:'주문이 몰려 잠시 대기 중입니다. 같은 주문을 다시 제출해도 중복 접수되지 않습니다.'}},{status:503,headers:{'Cache-Control':'no-store','Retry-After':'12'}});
   if (
     /stock|insufficient_balance|completed_order_is_final|cancelled_order_is_final|prepay_payment_is_final|point_earned_payment_is_final|invalid_point_amount|UNIQUE/u.test(
       message,

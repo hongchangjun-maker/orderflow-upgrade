@@ -17,6 +17,17 @@ import { upload } from "./media";
 import { failure, readInput, success } from "./router";
 import { now, parse, transaction, type LiveContext } from "./store";
 export async function publicApi(request: Request) {
+  // Only this endpoint has a required durable idempotency key. Never replay
+  // arbitrary chat messages, uploads, money operations or seller mutations.
+  const safeOrder=request.method==='POST'&&/^\/api\/live-public\/form\/[a-f\d]{32}$/u.test(new URL(request.url).pathname);
+  for(let attempt=0;;attempt++){
+    const response=await publicApiOnce(safeOrder?request.clone() as Request:request);
+    if(!safeOrder||response.status!==503||attempt>=2)return response;
+    await response.body?.cancel();
+    await new Promise(resolve=>setTimeout(resolve,12000+attempt*3000+Math.floor(Math.random()*4000)));
+  }
+}
+async function publicApiOnce(request: Request) {
   try {
     const db = getD1(),
       url = new URL(request.url),

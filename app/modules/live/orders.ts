@@ -145,7 +145,7 @@ export async function createLiveOrder(
       .bind(c.shop, mobile, name, JSON.stringify(data), time),
     c.db
       .prepare(
-        "INSERT INTO of_orders(shop,form_id,customer_id,key,idempotency,request_hash,order_date,amount,fee,data,created_at,updated_at) VALUES(?,?,(SELECT id FROM of_customers WHERE shop=? AND mobile=?),?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO of_orders(shop,form_id,customer_id,key,idempotency,request_hash,order_date,amount,fee,data,created_at,updated_at) VALUES(?,?,(SELECT id FROM of_customers WHERE shop=? AND mobile=?),?,?,?,?,?,?,?,?,?) RETURNING id",
       )
       .bind(
         c.shop,
@@ -167,16 +167,15 @@ export async function createLiveOrder(
     if(delta)statements.push(kind==='prepay'?c.db.prepare("INSERT INTO of_ledger(shop,mobile,kind,delta,memo,operation,actor,created_at) SELECT ?,?,'prepay',-(amount+fee-COALESCE(json_extract(data,'$.point_used'),0)+COALESCE(json_extract(data,'$.adjustment'),0)),?,?,?,? FROM of_orders WHERE key=? AND amount+fee-COALESCE(json_extract(data,'$.point_used'),0)+COALESCE(json_extract(data,'$.adjustment'),0)>0").bind(c.shop,mobile,'주문 결제',operation,c.actor,time,key):c.db.prepare('INSERT INTO of_ledger(shop,mobile,kind,delta,memo,operation,actor,created_at) VALUES(?,?,?,?,?,?,?,?)').bind(c.shop,mobile,kind,delta,'주문 결제',operation,c.actor,time));
   }
   if(quote.pay==='prepay')statements.push(c.db.prepare("UPDATE of_orders SET ispaid='Y' WHERE key=?").bind(key));
-  for (const i of items)
-    statements.push(
-      c.db
-        .prepare(
-          "INSERT INTO of_order_items(order_id,item_id,name,unit,quantity,price) VALUES((SELECT id FROM of_orders WHERE key=?),?,?,?,?,?)",
-        )
-        .bind(key, i.id, i.name, i.unit, i.qty, i.price),
-    );
+  // One statement for the cart, retaining each row's stock trigger. Avoid 20+
+  // separate D1 result serializations for a normal produce order.
+  statements.push(c.db.prepare("INSERT INTO of_order_items(order_id,item_id,name,unit,quantity,price) SELECT (SELECT id FROM of_orders WHERE key=?),json_extract(value,'$.id'),json_extract(value,'$.name'),json_extract(value,'$.unit'),json_extract(value,'$.qty'),json_extract(value,'$.price') FROM json_each(?)").bind(key,JSON.stringify(items)));
+  // Never report a committed order as failed merely because a later audit write
+  // was throttled. Order, inventory, ledgers and seller notification commit once.
+  statements.push(c.db.prepare("INSERT INTO of_changes(shop,kind,entity,actor,created_at) VALUES(?,'order:new',?,?,?)").bind(c.shop,key,c.actor,time));
+  let orderNo:unknown;
   try {
-    await transaction(c, statements, [
+    const result=await transaction(c, statements, [
       {
         sql: "EXISTS(SELECT 1 FROM of_forms WHERE id=? AND shop=? AND active=1 AND revision=?)",
         values: [formId, c.shop, setting.revision],
@@ -186,6 +185,7 @@ export async function createLiveOrder(
         values: [JSON.stringify(items), formId, c.shop],
       },
     ]);
+    orderNo=obj(result[3].results[0]).id;
   } catch (error) {
     const duplicate = await first(
       c,
@@ -203,9 +203,7 @@ export async function createLiveOrder(
       );
     throw error;
   }
-  const order = await first(c, "SELECT id FROM of_orders WHERE key=?", key);
-  await audit(c, "order:new", key);
-  return { orderNo: order?.id, key, replayed: false };
+  return { orderNo, key, replayed: false };
 }
 export async function ordersApi(
   c: LiveContext,

@@ -87,3 +87,4 @@ process.env.LIVE_LOAD??='300';
 await import("../tests/live-http.mjs");
 const {runParity}=await import("../tests/parity-http.mjs");
 await runParity(base,cookie,{email:emails[0],password});
+await import('./verify-burst-repeat.mjs');
